@@ -19,7 +19,7 @@ class InMemoryStaffStore {
     // Seed data for local/dev testing — replace the phone number with your
     // own (international format, no "+") to test the recognised-sender path.
     this.upsert({
-      phone: "61400000000",
+      phone: "61420878724",
       tenantId: "demo-venue",
       name: "Mothy",
       role: "owner",

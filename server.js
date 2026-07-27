@@ -96,7 +96,7 @@ app.post("/webhook/whatsapp", (req, res) => {
  * server's own API, which is gated by a shared key below.
  */
 app.get("/dashboard", (_req, res) => {
-  res.sendFile(path.join(__dirname, "..", "public", "dashboard.html"));
+  res.sendFile(path.join(__dirname, "public", "dashboard.html"));
 });
 
 /**

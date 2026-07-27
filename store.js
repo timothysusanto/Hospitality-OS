@@ -19,7 +19,7 @@ class InMemoryStaffStore {
     // Seed data for local/dev testing — replace the phone number with your
     // own (international format, no "+") to test the recognised-sender path.
     this.upsert({
-      phone: "61420878724",
+      phone: "61400000000",
       tenantId: "demo-venue",
       name: "Mothy",
       role: "owner",
@@ -35,6 +35,11 @@ class InMemoryStaffStore {
   /** @param {string} phone @returns {Promise<StaffRecord|null>} */
   async findByPhone(phone) {
     return this._staff.get(phone) || null;
+  }
+
+  /** @param {string} tenantId @returns {Promise<StaffRecord[]>} */
+  async listByTenant(tenantId) {
+    return [...this._staff.values()].filter((s) => s.tenantId === tenantId);
   }
 }
 
@@ -62,6 +67,16 @@ class FirestoreStaffStore {
   async findByPhone(phone) {
     const doc = await this.collection.doc(phone).get();
     return doc.exists ? { phone, ...doc.data() } : null;
+  }
+
+  /**
+   * Single-field equality filter only (no orderBy paired with it), so this
+   * does not require a composite index — unlike the shifts queries.
+   * @param {string} tenantId @returns {Promise<StaffRecord[]>}
+   */
+  async listByTenant(tenantId) {
+    const snap = await this.collection.where("tenantId", "==", tenantId).get();
+    return snap.docs.map((doc) => ({ phone: doc.id, ...doc.data() }));
   }
 }
 

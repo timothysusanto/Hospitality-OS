@@ -73,6 +73,34 @@ class InMemoryShiftsStore {
     active.end = endIso;
     return shift;
   }
+
+  /**
+   * All shifts for a tenant, unsorted — the dashboard/API layer sorts and
+   * buckets these (on-shift / flagged / history) in plain JS.
+   * @param {string} tenantId @returns {Promise<object[]>}
+   */
+  async listByTenant(tenantId) {
+    return [...this._shifts.values()].filter((s) => s.tenantId === tenantId);
+  }
+
+  /**
+   * Manager approves or denies a flagged out-of-radius clock-in.
+   * Approve: clears the flag, marks it within radius, leaves the shift open.
+   * Deny: closes the shift immediately with a `denied: true` clockOut, so it
+   * drops out of "on shift now" and "needs review" but stays in history.
+   * @param {string} shiftId @param {boolean} approve
+   */
+  async reviewFlaggedShift(shiftId, approve) {
+    const shift = this._shifts.get(shiftId);
+    if (!shift) throw new Error(`No shift found with id ${shiftId}`);
+    if (approve) {
+      shift.clockIn.flaggedForReview = false;
+      shift.clockIn.withinRadius = true;
+    } else {
+      shift.clockOut = { time: new Date().toISOString(), denied: true };
+    }
+    return shift;
+  }
 }
 
 /**
@@ -139,6 +167,37 @@ class FirestoreShiftsStore {
     active.end = endIso;
     await docRef.update({ breaks });
     return { shiftId, ...doc.data(), breaks };
+  }
+
+  /**
+   * Single-field equality filter only (no orderBy paired with it), so this
+   * does not require a composite index. The API layer sorts/buckets the
+   * results in plain JS instead of asking Firestore to do it.
+   * @param {string} tenantId @returns {Promise<object[]>}
+   */
+  async listByTenant(tenantId) {
+    const snap = await this.collection.where("tenantId", "==", tenantId).get();
+    return snap.docs.map((doc) => ({ shiftId: doc.id, ...doc.data() }));
+  }
+
+  /**
+   * Manager approves or denies a flagged out-of-radius clock-in.
+   * @param {string} shiftId @param {boolean} approve
+   */
+  async reviewFlaggedShift(shiftId, approve) {
+    const docRef = this.collection.doc(shiftId);
+    if (approve) {
+      await docRef.update({
+        "clockIn.flaggedForReview": false,
+        "clockIn.withinRadius": true,
+      });
+    } else {
+      await docRef.update({
+        clockOut: { time: new Date().toISOString(), denied: true },
+      });
+    }
+    const doc = await docRef.get();
+    return { shiftId, ...doc.data() };
   }
 }
 

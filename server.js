@@ -8,10 +8,15 @@
  */
 
 const express = require("express");
+const path = require("path");
 const { verifyMetaSignature } = require("./verifySignature");
 const { handleIncoming } = require("./router");
 const { buildStores } = require("./stores");
 const { InMemoryPendingActions } = require("./pendingActions");
+
+// The single venue this build supports so far (see decisions log — multi-
+// tenant support is a later step). The dashboard is scoped to this tenant.
+const DASHBOARD_TENANT_ID = "demo-venue";
 
 const app = express();
 const { staffStore, tenantStore, shiftsStore, backend } = buildStores();
@@ -83,6 +88,72 @@ app.post("/webhook/whatsapp", (req, res) => {
   }
 });
 
+/**
+ * Manager dashboard (build step 3) — a page served directly by this server,
+ * reading real data through the same admin Firestore connection the bot
+ * already uses. No separate client-side Firebase config or security rules
+ * needed: the browser never talks to Firestore directly, only to this
+ * server's own API, which is gated by a shared key below.
+ */
+app.get("/dashboard", (_req, res) => {
+  res.sendFile(path.join(__dirname, "..", "public", "dashboard.html"));
+});
+
+/**
+ * Gate for everything under /api — requires a shared secret set as
+ * MANAGER_DASHBOARD_PASSWORD in Railway's Variables tab. Accepts the key as
+ * either a query param (?key=...) or an X-Dashboard-Key header.
+ * If the env var isn't set at all, every request is rejected — safer than
+ * silently allowing open access.
+ */
+function requireDashboardKey(req, res, next) {
+  const expected = process.env.MANAGER_DASHBOARD_PASSWORD;
+  if (!expected) {
+    return res.status(500).json({ error: "MANAGER_DASHBOARD_PASSWORD is not set on the server." });
+  }
+  const provided = req.query.key || req.get("X-Dashboard-Key");
+  if (provided !== expected) {
+    return res.status(401).json({ error: "Invalid or missing dashboard key." });
+  }
+  next();
+}
+
+/**
+ * GET /api/dashboard — everything the dashboard page needs in one call:
+ * the venue's staff list and every shift record for this tenant. Sorting
+ * into "on shift now" / "needs review" / "history" happens client-side in
+ * dashboard.html, not here — keeps this endpoint a single simple query per
+ * collection (no compound Firestore indexes required).
+ */
+app.get("/api/dashboard", requireDashboardKey, async (_req, res) => {
+  try {
+    const [staff, shifts, venue] = await Promise.all([
+      staffStore.listByTenant(DASHBOARD_TENANT_ID),
+      shiftsStore.listByTenant(DASHBOARD_TENANT_ID),
+      tenantStore.findById(DASHBOARD_TENANT_ID),
+    ]);
+    res.json({ staff, shifts, venue });
+  } catch (err) {
+    console.error("[dashboard] failed to load data:", err);
+    res.status(500).json({ error: "Failed to load dashboard data." });
+  }
+});
+
+/**
+ * POST /api/shifts/:id/review — Approve or Deny a flagged out-of-radius
+ * clock-in. Body: { approve: boolean }.
+ */
+app.post("/api/shifts/:id/review", requireDashboardKey, async (req, res) => {
+  try {
+    const approve = Boolean(req.body?.approve);
+    const updated = await shiftsStore.reviewFlaggedShift(req.params.id, approve);
+    res.json({ ok: true, shift: updated });
+  } catch (err) {
+    console.error("[dashboard] failed to review shift:", err);
+    res.status(500).json({ error: "Failed to update that shift." });
+  }
+});
+
 // Simple liveness probe for the host / uptime checks.
 app.get("/health", (_req, res) => res.json({ ok: true, service: "hospitality-os", step: 2, backend }));
 
@@ -94,6 +165,9 @@ const missing = required.filter((k) => !process.env[k]);
 if (missing.length) {
   console.warn(`[startup] WARNING — missing env vars: ${missing.join(", ")}`);
   console.warn("[startup] The server will start, but webhook verification and replies will fail until these are set.");
+}
+if (!process.env.MANAGER_DASHBOARD_PASSWORD) {
+  console.warn("[startup] MANAGER_DASHBOARD_PASSWORD is not set — /dashboard will load but its data API will reject all requests until it's set.");
 }
 
 app.listen(PORT, () => {

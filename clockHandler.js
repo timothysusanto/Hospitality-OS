@@ -4,11 +4,14 @@ const { sendText, sendLocationRequest } = require("./whatsapp");
 const { checkGeofence } = require("./geofence");
 
 /**
- * Handles the clock in/out flow. Two-step by necessity: WhatsApp can only
- * get a location when the user deliberately shares one (there is no silent
- * background read, unlike a native app) — so "in"/"out" as text triggers a
- * location request, and the actual clock event happens when the location
- * message arrives.
+ * Handles the clock in/out flow, plus mid-shift breaks. Clock in/out is
+ * two-step by necessity: WhatsApp can only get a location when the user
+ * deliberately shares one (there is no silent background read, unlike a
+ * native app) — so "in"/"out" as text triggers a location request, and the
+ * actual clock event happens when the location message arrives.
+ *
+ * Breaks don't need a location share (staff is already on-site) — "break"
+ * and "back" act immediately on the text message alone.
  */
 
 /**
@@ -43,10 +46,6 @@ async function handleLocationForClockAction(from, staff, location, action, deps)
 
   if (action === "clock_in") {
     if (!result.withinRadius) {
-      // No accuracy data from WhatsApp (see geofence.js) — we can't tell
-      // "bad signal" from "actually not there", so we don't hard-block.
-      // Record the attempt and point to the manager-override path (the
-      // manager dashboard, build step 3, will surface this for approval).
       await recordFlaggedAttempt(shiftsStore, staff, location, result);
       await sendText(
         from,
@@ -79,6 +78,11 @@ async function handleLocationForClockAction(from, staff, location, action, deps)
     return;
   }
 
+  if (hasActiveBreak(openShift)) {
+    await sendText(from, 'You\'re still on break — message "back" to end your break before clocking out.');
+    return;
+  }
+
   await shiftsStore.closeShift(openShift.shiftId, {
     time: new Date().toISOString(),
     lat: location.latitude,
@@ -87,15 +91,82 @@ async function handleLocationForClockAction(from, staff, location, action, deps)
     distanceMeters: result.distanceMeters,
   });
 
-  const durationMs = Date.now() - new Date(openShift.clockIn.time).getTime();
-  const hours = (durationMs / 1000 / 60 / 60).toFixed(1);
+  const workedMs = shiftDurationMinusBreaks(openShift, Date.now());
+  const hours = (workedMs / 1000 / 60 / 60).toFixed(1);
   await sendText(from, `Clocked out, ${staff.name} — that was a ${hours}hr shift. See you next time!`);
 }
 
 /**
- * Records an out-of-radius clock-in attempt so the (future) manager
- * dashboard has something to show and approve. The manager-facing override
- * UI itself is build step 3 — this just makes sure the data exists.
+ * Staff texts "break" — starts a break on their currently open shift.
+ * No location needed; they're already on-site for an open shift to exist.
+ */
+async function startBreak(from, staff, deps) {
+  const { shiftsStore } = deps;
+  const openShift = await shiftsStore.findOpenShift(from);
+  if (!openShift) {
+    await sendText(from, 'You\'re not clocked in right now, so there\'s no shift to take a break from. Message "in" first.');
+    return;
+  }
+  if (hasActiveBreak(openShift)) {
+    await sendText(from, "You're already on break — message \"back\" when you're ready to resume.");
+    return;
+  }
+  try {
+    await shiftsStore.startBreak(openShift.shiftId, new Date().toISOString());
+    await sendText(from, `Break started, ${staff.name} — message "back" when you're back on the floor.`);
+  } catch (err) {
+    console.error("[break] failed to start break:", err);
+    await sendText(from, "Couldn't start your break just now — please try again in a moment.");
+  }
+}
+
+/**
+ * Staff texts "back" — ends the active break on their currently open shift.
+ */
+async function endBreak(from, staff, deps) {
+  const { shiftsStore } = deps;
+  const openShift = await shiftsStore.findOpenShift(from);
+  if (!openShift || !hasActiveBreak(openShift)) {
+    await sendText(from, 'You\'re not currently on a break. Message "break" to start one, or "out" to clock out.');
+    return;
+  }
+  try {
+    const updated = await shiftsStore.endBreak(openShift.shiftId, new Date().toISOString());
+    const breaks = updated.breaks || [];
+    const last = breaks[breaks.length - 1];
+    const breakMinutes = Math.round((new Date(last.end) - new Date(last.start)) / 1000 / 60);
+    await sendText(from, `Welcome back, ${staff.name} — that was a ${breakMinutes} min break.`);
+  } catch (err) {
+    console.error("[break] failed to end break:", err);
+    await sendText(from, "Couldn't end your break just now — please try again in a moment.");
+  }
+}
+
+/** @returns {boolean} true if the shift's most recent break has no `end` yet */
+function hasActiveBreak(shift) {
+  const breaks = shift.breaks || [];
+  const last = breaks[breaks.length - 1];
+  return Boolean(last && !last.end);
+}
+
+/**
+ * Total shift duration from clockIn to `nowMs`, minus the total time spent
+ * on completed breaks. An active break (shouldn't happen — clock-out blocks
+ * on it — but defensively) is not subtracted since it has no end yet.
+ */
+function shiftDurationMinusBreaks(shift, nowMs) {
+  const totalMs = nowMs - new Date(shift.clockIn.time).getTime();
+  const breaks = shift.breaks || [];
+  const breakMs = breaks.reduce((sum, b) => {
+    if (!b.end) return sum;
+    return sum + (new Date(b.end).getTime() - new Date(b.start).getTime());
+  }, 0);
+  return Math.max(0, totalMs - breakMs);
+}
+
+/**
+ * Records an out-of-radius clock-in attempt so the manager dashboard has
+ * something to show and approve.
  */
 async function recordFlaggedAttempt(shiftsStore, staff, location, result) {
   try {
@@ -117,4 +188,4 @@ async function recordFlaggedAttempt(shiftsStore, staff, location, result) {
   }
 }
 
-module.exports = { requestClockAction, handleLocationForClockAction };
+module.exports = { requestClockAction, handleLocationForClockAction, startBreak, endBreak };

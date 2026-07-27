@@ -1,14 +1,15 @@
 "use strict";
 
 const { sendText } = require("./whatsapp");
-const { requestClockAction, handleLocationForClockAction } = require("./clockHandler");
+const { requestClockAction, handleLocationForClockAction, startBreak, endBreak } = require("./clockHandler");
 
 /**
  * Route a single incoming WhatsApp message.
  *
- * Build step 2 status: clock in/out is real. Stock (photo), P&L (photo),
- * and recipe lookup are still stubbed — each arrives as its own handler
- * module in later steps (frontend unified, backend modular — decisions log).
+ * Build step 2 status: clock in/out and breaks are real. Stock (photo),
+ * P&L (photo), and recipe lookup are still stubbed — each arrives as its
+ * own handler module in later steps (frontend unified, backend modular —
+ * decisions log).
  *
  * @param {object} message   One entry from value.messages[] in the webhook payload
  * @param {object} deps      { staffStore, tenantStore, shiftsStore, pendingActions }
@@ -43,10 +44,18 @@ async function handleIncoming(message, deps) {
       await requestClockAction(from, "clock_out", deps);
       return;
     }
+    if (body === "break") {
+      await startBreak(from, staff, deps);
+      return;
+    }
+    if (body === "back") {
+      await endBreak(from, staff, deps);
+      return;
+    }
 
     await sendText(
       from,
-      `Hi ${staff.name} — message "in" or "out" to clock in/out. Photo-based stock and P&L flows arrive in a later build step.`
+      `Hi ${staff.name} — message "in"/"out" to clock in/out, or "break"/"back" for a break. Photo-based stock and P&L flows arrive in a later build step.`
     );
     return;
   }

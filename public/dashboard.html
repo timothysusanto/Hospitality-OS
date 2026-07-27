@@ -1,0 +1,335 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>HospitalityOS — Kitchen Pass</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Oswald:wght@500;700&family=IBM+Plex+Mono:wght@400;500;600&family=Inter:wght@400;500;600&display=swap');
+
+  :root {
+    --bg: #1B1D1F;
+    --panel: #26292C;
+    --line: #3A3E42;
+    --ticket: #F3EEE2;
+    --ink: #2A2622;
+    --ink-soft: #6B6558;
+    --ink-faint: #8A8477;
+    --ember: #E2661C;
+    --ember-dark: #8a1f1f;
+    --herb: #5C8A5A;
+    --herb-dark: #3E6B41;
+    --text: #EDEAE3;
+    --text-dim: #8A8F94;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Inter', sans-serif;
+    padding: 32px 16px 60px;
+  }
+  .display { font-family: 'Oswald', sans-serif; letter-spacing: 0.02em; }
+  .mono { font-family: 'IBM Plex Mono', monospace; }
+
+  .wrap { max-width: 1200px; margin: 0 auto; }
+
+  header {
+    display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between;
+    gap: 12px; padding-bottom: 24px; margin-bottom: 32px; border-bottom: 1px solid var(--line);
+  }
+  .brand { display: flex; align-items: center; gap: 12px; }
+  .brand-icon {
+    width: 44px; height: 44px; border-radius: 50%; background: var(--panel);
+    border: 1px solid var(--line); display: flex; align-items: center; justify-content: center;
+    font-size: 20px;
+  }
+  h1 { font-size: 26px; font-weight: 700; text-transform: uppercase; margin: 0; color: var(--ticket); }
+  .subline { font-size: 12px; color: var(--text-dim); margin: 2px 0 0; }
+  .badges { display: flex; gap: 10px; flex-wrap: wrap; }
+  .badge {
+    display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-radius: 6px;
+    background: var(--panel); border: 1px solid var(--line); font-size: 13px;
+  }
+  .badge.warn { background: #3A2418; border-color: var(--ember); color: #F0A66A; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--herb); display: inline-block; }
+
+  h2.section {
+    font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em;
+    color: var(--text-dim); margin: 0 0 16px;
+  }
+  .section.warn-title { color: var(--ember); }
+
+  .cols { display: grid; grid-template-columns: 2fr 1fr; gap: 32px; margin-bottom: 40px; }
+  @media (max-width: 800px) { .cols { grid-template-columns: 1fr; } }
+
+  .empty {
+    padding: 24px; border-radius: 6px; border: 1px dashed var(--line);
+    background: var(--panel); color: var(--text-dim); font-size: 13px; text-align: center;
+  }
+
+  .tickets { display: flex; flex-wrap: wrap; gap: 20px; }
+  .ticket {
+    background: var(--ticket); color: var(--ink); width: 190px; padding: 18px 16px 22px;
+    box-shadow: 0 6px 14px rgba(0,0,0,0.35); position: relative;
+    clip-path: polygon(0% 0%, 100% 0%, 100% 92%, 94% 96%, 88% 92%, 82% 96%, 76% 92%, 70% 96%,
+      64% 92%, 58% 96%, 52% 92%, 46% 96%, 40% 92%, 34% 96%, 28% 92%, 22% 96%, 16% 92%,
+      10% 96%, 4% 92%, 0% 96%);
+  }
+  .pin {
+    position: absolute; top: 8px; left: 50%; transform: translateX(-50%);
+    width: 10px; height: 10px; border-radius: 50%; background: var(--ember-dark);
+    box-shadow: 0 1px 2px rgba(0,0,0,0.4);
+  }
+  .pin.flag { background: var(--ember); }
+  .t-name { font-size: 16px; font-weight: 700; text-transform: uppercase; margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .t-dept { font-size: 11px; text-transform: uppercase; color: var(--ink-soft); margin: 0 0 12px; }
+  .t-time { display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; color: var(--herb-dark); margin-bottom: 2px; }
+  .t-sub { font-size: 10px; color: var(--ink-faint); margin: 0; }
+
+  .flag-card { background: var(--ticket); color: var(--ink); padding: 18px 16px 24px; box-shadow: 0 6px 14px rgba(0,0,0,0.35); position: relative; margin-bottom: 16px;
+    clip-path: polygon(0% 0%, 100% 0%, 100% 92%, 94% 96%, 88% 92%, 82% 96%, 76% 92%, 70% 96%,
+      64% 92%, 58% 96%, 52% 92%, 46% 96%, 40% 92%, 34% 96%, 28% 92%, 22% 96%, 16% 92%,
+      10% 96%, 4% 92%, 0% 96%);
+  }
+  .flag-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+  .flag-badge { font-size: 10px; font-weight: 600; padding: 2px 6px; border-radius: 4px; background: var(--ember-dark); color: var(--ticket); white-space: nowrap; }
+  .flag-dist { display: flex; align-items: center; gap: 6px; margin-top: 12px; font-size: 13px; font-weight: 600; color: var(--ember-dark); }
+  .flag-actions { display: flex; gap: 8px; margin-top: 16px; }
+  .btn { flex: 1; font-family: 'IBM Plex Mono', monospace; font-size: 12px; font-weight: 600; padding: 7px 0; border-radius: 4px; border: none; cursor: pointer; }
+  .btn.approve { background: var(--herb); color: var(--ticket); }
+  .btn.deny { background: transparent; color: var(--ember-dark); border: 1px solid var(--ember-dark); }
+  .btn:disabled { opacity: 0.5; cursor: default; }
+
+  table { width: 100%; border-collapse: collapse; font-family: 'IBM Plex Mono', monospace; font-size: 13px; }
+  .table-wrap { border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
+  th { text-align: left; font-weight: 500; padding: 10px 16px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.03em; background: var(--panel); color: var(--text-dim); }
+  td { padding: 10px 16px; border-top: 1px solid #2C2F32; }
+  tr:nth-child(even) td { background: #1F2224; }
+  tr:nth-child(odd) td { background: var(--bg); }
+  .dur { color: var(--herb); font-weight: 600; }
+
+  #gate {
+    max-width: 360px; margin: 100px auto; text-align: center;
+  }
+  #gate input {
+    width: 100%; padding: 10px 12px; margin-top: 16px; border-radius: 6px; border: 1px solid var(--line);
+    background: var(--panel); color: var(--text); font-family: 'IBM Plex Mono', monospace; font-size: 14px;
+  }
+  #gate button {
+    margin-top: 12px; width: 100%; padding: 10px 0; border-radius: 6px; border: none;
+    background: var(--ember); color: var(--ticket); font-family: 'IBM Plex Mono', monospace; font-weight: 600; cursor: pointer;
+  }
+  #gate .err { color: var(--ember); font-size: 12px; margin-top: 10px; min-height: 16px; }
+</style>
+</head>
+<body>
+
+<div id="gate">
+  <h1 class="display" style="font-size: 22px;">🍳 Kitchen Pass</h1>
+  <p class="mono" style="color: var(--text-dim); font-size: 13px;">Enter your manager key to view the dashboard.</p>
+  <input id="keyInput" type="password" placeholder="Manager key" />
+  <button onclick="submitKey()">Unlock</button>
+  <p class="err" id="gateErr"></p>
+</div>
+
+<div class="wrap" id="dashboard" style="display:none;">
+  <header>
+    <div class="brand">
+      <div class="brand-icon">🍳</div>
+      <div>
+        <h1 class="display">Kitchen Pass</h1>
+        <p class="subline mono" id="venueLine">Loading…</p>
+      </div>
+    </div>
+    <div class="badges">
+      <div class="badge mono"><span class="dot"></span><span id="onShiftCount">0 on shift</span></div>
+      <div class="badge warn mono" id="reviewBadge" style="display:none;">⚠ <span id="reviewCount">0 need review</span></div>
+    </div>
+  </header>
+
+  <div class="cols">
+    <div>
+      <h2 class="section">On Shift Now</h2>
+      <div id="onShiftList"></div>
+    </div>
+    <div>
+      <h2 class="section warn-title">Needs Review</h2>
+      <div id="reviewList"></div>
+    </div>
+  </div>
+
+  <div>
+    <h2 class="section">Recent Shifts</h2>
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr><th>Staff</th><th>Date</th><th>In</th><th>Out</th><th>Duration</th></tr>
+        </thead>
+        <tbody id="historyBody"></tbody>
+      </table>
+    </div>
+  </div>
+</div>
+
+<script>
+  const KEY_STORAGE = "hos_dashboard_key";
+  let managerKey = localStorage.getItem(KEY_STORAGE) || "";
+
+  function submitKey() {
+    const val = document.getElementById("keyInput").value.trim();
+    if (!val) return;
+    managerKey = val;
+    localStorage.setItem(KEY_STORAGE, val);
+    loadDashboard();
+  }
+
+  function fmtClock(iso) {
+    return new Date(iso).toLocaleTimeString("en-AU", { hour: "2-digit", minute: "2-digit" });
+  }
+  function fmtDay(iso) {
+    return new Date(iso).toLocaleDateString("en-AU", { weekday: "short", day: "numeric", month: "short" });
+  }
+  function fmtDuration(ms) {
+    const totalMin = Math.max(0, Math.floor(ms / 60000));
+    return `${Math.floor(totalMin / 60)}h ${String(totalMin % 60).padStart(2, "0")}m`;
+  }
+  function staffName(staffList, phone) {
+    const s = staffList.find((x) => x.phone === phone);
+    return s ? s.name : phone;
+  }
+  function staffDept(staffList, phone) {
+    const s = staffList.find((x) => x.phone === phone);
+    return s ? (s.department || "—") : "—";
+  }
+  function rotationFor(id) {
+    let seed = 0;
+    for (const c of id) seed += c.charCodeAt(0);
+    return ((seed % 7) - 3) * 0.6;
+  }
+
+  async function loadDashboard() {
+    document.getElementById("gateErr").textContent = "";
+    let data;
+    try {
+      const res = await fetch(`/api/dashboard?key=${encodeURIComponent(managerKey)}`);
+      if (res.status === 401) {
+        document.getElementById("gateErr").textContent = "Wrong key — try again.";
+        return;
+      }
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      data = await res.json();
+    } catch (err) {
+      document.getElementById("gateErr").textContent = "Couldn't reach the server — try refreshing.";
+      return;
+    }
+
+    document.getElementById("gate").style.display = "none";
+    document.getElementById("dashboard").style.display = "block";
+    render(data);
+  }
+
+  function render(data) {
+    const { staff, shifts, venue } = data;
+    document.getElementById("venueLine").textContent = `${venue?.name || "Venue"} · ${new Date().toLocaleString("en-AU", { weekday: "long", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}`;
+
+    const onShift = shifts.filter((s) => !s.clockOut && !s.clockIn.flaggedForReview);
+    const flagged = shifts.filter((s) => !s.clockOut && s.clockIn.flaggedForReview);
+    const history = shifts
+      .filter((s) => s.clockOut && !s.clockOut.denied)
+      .sort((a, b) => new Date(b.clockIn.time) - new Date(a.clockIn.time))
+      .slice(0, 25);
+
+    document.getElementById("onShiftCount").textContent = `${onShift.length} on shift`;
+    const reviewBadge = document.getElementById("reviewBadge");
+    if (flagged.length > 0) {
+      reviewBadge.style.display = "flex";
+      document.getElementById("reviewCount").textContent = `${flagged.length} need${flagged.length === 1 ? "s" : ""} review`;
+    } else {
+      reviewBadge.style.display = "none";
+    }
+
+    // On shift now
+    const onShiftList = document.getElementById("onShiftList");
+    if (onShift.length === 0) {
+      onShiftList.innerHTML = `<div class="empty">Nobody's clocked in. Tickets appear here the moment someone texts "in".</div>`;
+    } else {
+      onShiftList.innerHTML = `<div class="tickets">${onShift.map((s) => {
+        const elapsed = Date.now() - new Date(s.clockIn.time).getTime();
+        const name = staffName(staff, s.staffPhone);
+        return `
+          <div class="ticket" style="transform: rotate(${rotationFor(s.shiftId)}deg);">
+            <span class="pin"></span>
+            <p class="t-name display">${name}</p>
+            <p class="t-dept mono">${staffDept(staff, s.staffPhone)}</p>
+            <div class="t-time mono">⏱ ${fmtDuration(elapsed)}</div>
+            <p class="t-sub mono">in at ${fmtClock(s.clockIn.time)}</p>
+          </div>`;
+      }).join("")}</div>`;
+    }
+
+    // Needs review
+    const reviewList = document.getElementById("reviewList");
+    if (flagged.length === 0) {
+      reviewList.innerHTML = `<div class="empty">Nothing flagged. Out-of-range clock-ins land here for approval.</div>`;
+    } else {
+      reviewList.innerHTML = flagged.map((s) => {
+        const name = staffName(staff, s.staffPhone);
+        return `
+          <div class="flag-card" style="transform: rotate(${(-1 * rotationFor(s.shiftId))}deg);">
+            <span class="pin flag"></span>
+            <div class="flag-top">
+              <div>
+                <p class="t-name display">${name}</p>
+                <p class="t-dept mono">${staffDept(staff, s.staffPhone)}</p>
+              </div>
+              <span class="flag-badge mono">FLAGGED</span>
+            </div>
+            <div class="flag-dist mono">📍 ${s.clockIn.distanceMeters}m from venue</div>
+            <p class="t-sub mono">attempted at ${fmtClock(s.clockIn.time)}</p>
+            <div class="flag-actions">
+              <button class="btn approve" onclick="review('${s.shiftId}', true, this)">✓ Approve</button>
+              <button class="btn deny" onclick="review('${s.shiftId}', false, this)">✕ Deny</button>
+            </div>
+          </div>`;
+      }).join("");
+    }
+
+    // History table
+    const historyBody = document.getElementById("historyBody");
+    historyBody.innerHTML = history.map((s) => {
+      const name = staffName(staff, s.staffPhone);
+      const durationMs = new Date(s.clockOut.time) - new Date(s.clockIn.time);
+      return `<tr>
+        <td>${name}</td>
+        <td>${fmtDay(s.clockIn.time)}</td>
+        <td>${fmtClock(s.clockIn.time)}</td>
+        <td>${fmtClock(s.clockOut.time)}</td>
+        <td class="dur">${fmtDuration(durationMs)}</td>
+      </tr>`;
+    }).join("");
+  }
+
+  async function review(shiftId, approve, btnEl) {
+    const card = btnEl.closest(".flag-card");
+    card.querySelectorAll("button").forEach((b) => (b.disabled = true));
+    try {
+      const res = await fetch(`/api/shifts/${encodeURIComponent(shiftId)}/review?key=${encodeURIComponent(managerKey)}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ approve }),
+      });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      await loadDashboard();
+    } catch (err) {
+      card.querySelectorAll("button").forEach((b) => (b.disabled = false));
+      alert("Couldn't save that — please try again.");
+    }
+  }
+
+  if (managerKey) loadDashboard();
+  setInterval(() => { if (managerKey) loadDashboard(); }, 30000);
+</script>
+</body>
+</html>

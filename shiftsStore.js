@@ -1,12 +1,18 @@
 "use strict";
 
 /**
- * Shift records — clock in/out events.
+ * Shift records — clock in/out events, plus mid-shift breaks.
  * Data model (backend-build-scope.md):
  *   shifts/{shiftId} = { tenantId, staffId, department,
  *                        clockIn: {time, lat, lng, withinRadius, distanceMeters},
  *                        clockOut: {...} | null,
+ *                        breaks: [{ start, end }],
  *                        overridden: boolean }
+ *
+ * breaks is always an array (possibly empty). Each entry has `start` (ISO
+ * string) and `end` (ISO string, or null while the break is still active).
+ * Only one break can be active at a time per shift — startBreak() rejects
+ * if the last entry has no `end` yet.
  */
 
 class InMemoryShiftsStore {
@@ -16,9 +22,6 @@ class InMemoryShiftsStore {
     this._nextId = 1;
   }
 
-  /**
-   * @returns {Promise<{shiftId: string}>}
-   */
   async openShift({ tenantId, staffPhone, department, clockIn }) {
     const shiftId = `shift_${this._nextId++}`;
     this._shifts.set(shiftId, {
@@ -28,14 +31,11 @@ class InMemoryShiftsStore {
       department,
       clockIn,
       clockOut: null,
+      breaks: [],
     });
     return { shiftId };
   }
 
-  /**
-   * Finds the most recent open shift (no clockOut) for this phone number.
-   * @returns {Promise<object|null>}
-   */
   async findOpenShift(staffPhone) {
     let latest = null;
     for (const shift of this._shifts.values()) {
@@ -46,14 +46,31 @@ class InMemoryShiftsStore {
     return latest;
   }
 
-  /**
-   * @param {string} shiftId
-   * @param {object} clockOut
-   */
   async closeShift(shiftId, clockOut) {
     const shift = this._shifts.get(shiftId);
     if (!shift) throw new Error(`No shift found with id ${shiftId}`);
     shift.clockOut = clockOut;
+    return shift;
+  }
+
+  async startBreak(shiftId, startIso) {
+    const shift = this._shifts.get(shiftId);
+    if (!shift) throw new Error(`No shift found with id ${shiftId}`);
+    const breaks = shift.breaks || [];
+    const active = breaks[breaks.length - 1];
+    if (active && !active.end) throw new Error("BREAK_ALREADY_ACTIVE");
+    breaks.push({ start: startIso, end: null });
+    shift.breaks = breaks;
+    return shift;
+  }
+
+  async endBreak(shiftId, endIso) {
+    const shift = this._shifts.get(shiftId);
+    if (!shift) throw new Error(`No shift found with id ${shiftId}`);
+    const breaks = shift.breaks || [];
+    const active = breaks[breaks.length - 1];
+    if (!active || active.end) throw new Error("NO_ACTIVE_BREAK");
+    active.end = endIso;
     return shift;
   }
 }
@@ -77,6 +94,7 @@ class FirestoreShiftsStore {
       department,
       clockIn,
       clockOut: null,
+      breaks: [],
     });
     return { shiftId: ref.id };
   }
@@ -97,6 +115,30 @@ class FirestoreShiftsStore {
     await this.collection.doc(shiftId).update({ clockOut });
     const doc = await this.collection.doc(shiftId).get();
     return { shiftId, ...doc.data() };
+  }
+
+  async startBreak(shiftId, startIso) {
+    const docRef = this.collection.doc(shiftId);
+    const doc = await docRef.get();
+    if (!doc.exists) throw new Error(`No shift found with id ${shiftId}`);
+    const breaks = doc.data().breaks || [];
+    const active = breaks[breaks.length - 1];
+    if (active && !active.end) throw new Error("BREAK_ALREADY_ACTIVE");
+    breaks.push({ start: startIso, end: null });
+    await docRef.update({ breaks });
+    return { shiftId, ...doc.data(), breaks };
+  }
+
+  async endBreak(shiftId, endIso) {
+    const docRef = this.collection.doc(shiftId);
+    const doc = await docRef.get();
+    if (!doc.exists) throw new Error(`No shift found with id ${shiftId}`);
+    const breaks = doc.data().breaks || [];
+    const active = breaks[breaks.length - 1];
+    if (!active || active.end) throw new Error("NO_ACTIVE_BREAK");
+    active.end = endIso;
+    await docRef.update({ breaks });
+    return { shiftId, ...doc.data(), breaks };
   }
 }
 

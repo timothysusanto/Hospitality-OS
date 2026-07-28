@@ -388,6 +388,11 @@ app.post("/api/settings/penalties", requireDashboardKey, async (req, res) => {
         ? r.publicHolidays.filter((d) => /^\d{4}-\d{2}-\d{2}$/.test(String(d))).slice(0, 60)
         : [],
       preset: ["AU", "US", "custom"].includes(r.preset) ? r.preset : "custom",
+      slotHours: {
+        AM: num(r.slotHours && r.slotHours.AM, 0.5, 24) ?? 5,
+        PM: num(r.slotHours && r.slotHours.PM, 0.5, 24) ?? 6,
+        ALL: num(r.slotHours && r.slotHours.ALL, 0.5, 24) ?? 10,
+      },
     };
     await tenantStore.updateSettings(DASHBOARD_TENANT_ID, { penaltyRules });
     res.json({ ok: true, penaltyRules });
@@ -461,6 +466,25 @@ app.delete("/api/purchases/:id", requireDashboardKey, async (req, res) => {
   } catch (err) {
     console.error("[purchases] failed to delete:", err);
     res.status(500).json({ error: "Failed to remove that purchase." });
+  }
+});
+
+
+/**
+ * POST /api/shifts/:id/close — manager force clock-out for forgotten
+ * "out" texts (a nightly reality in kitchens). Closes the shift now with
+ * no location, marked forcedByManager so reports can tell it apart.
+ */
+app.post("/api/shifts/:id/close", requireDashboardKey, async (req, res) => {
+  try {
+    const updated = await shiftsStore.closeShift(req.params.id, {
+      time: new Date().toISOString(),
+      forcedByManager: true,
+    });
+    res.json({ ok: true, shift: updated });
+  } catch (err) {
+    console.error("[dashboard] failed to force-close shift:", err);
+    res.status(500).json({ error: "Failed to close that shift." });
   }
 });
 

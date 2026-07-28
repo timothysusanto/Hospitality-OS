@@ -488,6 +488,233 @@ app.post("/api/shifts/:id/close", requireDashboardKey, async (req, res) => {
   }
 });
 
+
+/**
+ * POST /api/shifts/:id/amend — timesheet correction with audit trail.
+ * Body: { clockInTime, clockOutTime, breakMinutes } (ISO strings / number).
+ * Originals stay untouched on the shift document; reports flag amended
+ * rows and include the original values.
+ */
+app.post("/api/shifts/:id/amend", requireDashboardKey, async (req, res) => {
+  try {
+    const { clockInTime, clockOutTime, breakMinutes } = req.body || {};
+    const validIso = (v) => !v || !isNaN(new Date(v).getTime());
+    if (!validIso(clockInTime) || !validIso(clockOutTime)) {
+      return res.status(400).json({ error: "clockInTime/clockOutTime must be valid times." });
+    }
+    const bm = breakMinutes != null ? Number(breakMinutes) : null;
+    if (bm != null && (!isFinite(bm) || bm < 0 || bm > 1440)) {
+      return res.status(400).json({ error: "breakMinutes must be 0–1440." });
+    }
+    const updated = await shiftsStore.amendShift(req.params.id, {
+      clockInTime, clockOutTime, breakMinutes: bm,
+    });
+    res.json({ ok: true, shift: updated });
+  } catch (err) {
+    console.error("[dashboard] failed to amend shift:", err);
+    res.status(500).json({ error: "Failed to amend that shift." });
+  }
+});
+
+/** Effective (amended-aware) times for a shift. Shared by both reports. */
+function effectiveShift(s) {
+  const inIso = (s.amended && s.amended.clockInTime) || s.clockIn.time;
+  const outIso = (s.amended && s.amended.clockOutTime) || (s.clockOut && s.clockOut.time);
+  const breakMs = s.amended && s.amended.breakMinutes != null
+    ? s.amended.breakMinutes * 60000
+    : (s.breaks || []).reduce((sum, b) => (b.end ? sum + (new Date(b.end) - new Date(b.start)) : sum), 0);
+  return { inIso, outIso, breakMs };
+}
+
+function reportDayMultiplier(dateIso, rules) {
+  if (!rules) return 1;
+  if ((rules.publicHolidays || []).includes(dateIso)) return rules.publicHoliday || 1;
+  const dow = new Date(dateIso + "T12:00:00").getDay();
+  if (dow === 6) return rules.saturday || 1;
+  if (dow === 0) return rules.sunday || 1;
+  return 1;
+}
+
+function reportMondayOf(dateIso) {
+  const d = new Date(dateIso + "T12:00:00");
+  const day = d.getDay();
+  d.setDate(d.getDate() + (day === 0 ? -6 : 1 - day));
+  return d.toISOString().slice(0, 10);
+}
+
+/**
+ * GET /api/reports/payroll?from=YYYY-MM-DD&to=YYYY-MM-DD
+ * The finance payment run: every closed shift in range with effective times,
+ * paid hours, rate, day multiplier and pay; weekly overtime lines per staff;
+ * per-staff and grand totals. Amended rows carry their originals — the
+ * audit trail finance requires.
+ */
+app.get("/api/reports/payroll", requireDashboardKey, async (req, res) => {
+  try {
+    const from = String(req.query.from || "");
+    const to = String(req.query.to || "");
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(from) || !/^\d{4}-\d{2}-\d{2}$/.test(to)) {
+      return res.status(400).json({ error: "from and to must be YYYY-MM-DD." });
+    }
+    const [staff, venue, shiftsRaw] = await Promise.all([
+      staffStore.listByTenant(DASHBOARD_TENANT_ID),
+      tenantStore.findById(DASHBOARD_TENANT_ID),
+      shiftsStore.listRecentByTenant(DASHBOARD_TENANT_ID, from),
+    ]);
+    const rules = venue && venue.penaltyRules;
+    const endExclusive = new Date(to + "T12:00:00");
+    endExclusive.setDate(endExclusive.getDate() + 1);
+    const endIso = endExclusive.toISOString().slice(0, 10);
+
+    const rows = [];
+    const weekHours = {}; // `${phone}|${weekStart}` -> hours
+    for (const s of shiftsRaw) {
+      if (!s.clockOut || s.clockOut.denied) continue;
+      const eff = effectiveShift(s);
+      if (!eff.outIso) continue;
+      const dateIso = eff.inIso.slice(0, 10);
+      if (dateIso < from || dateIso >= endIso) continue;
+      const person = staff.find((x) => x.phone === s.staffPhone);
+      const rate = person && person.wageRate != null ? Number(person.wageRate) : null;
+      const hours = Math.max(0, (new Date(eff.outIso) - new Date(eff.inIso) - eff.breakMs) / 3600000);
+      const mult = reportDayMultiplier(dateIso, rules);
+      const pay = rate != null ? hours * rate * mult : null;
+      const key = `${s.staffPhone}|${reportMondayOf(dateIso)}`;
+      weekHours[key] = (weekHours[key] || 0) + hours;
+      rows.push({
+        staffPhone: s.staffPhone,
+        name: person ? person.name : s.staffPhone,
+        date: dateIso,
+        clockIn: eff.inIso,
+        clockOut: eff.outIso,
+        breakMinutes: Math.round(eff.breakMs / 60000),
+        hours: Number(hours.toFixed(2)),
+        rate,
+        multiplier: mult,
+        pay: pay != null ? Number(pay.toFixed(2)) : null,
+        amended: Boolean(s.amended),
+        originalClockIn: s.amended ? s.clockIn.time : null,
+        originalClockOut: s.amended && s.clockOut ? s.clockOut.time : null,
+        forcedByManager: Boolean(s.clockOut && s.clockOut.forcedByManager),
+      });
+    }
+
+    // Weekly overtime premium lines (base-rate premium, matching the dashboard).
+    const otRows = [];
+    if (rules && rules.overtimeWeeklyHours) {
+      for (const [key, hours] of Object.entries(weekHours)) {
+        const over = hours - rules.overtimeWeeklyHours;
+        if (over <= 0) continue;
+        const [phone, weekStart] = key.split("|");
+        const person = staff.find((x) => x.phone === phone);
+        const rate = person && person.wageRate != null ? Number(person.wageRate) : null;
+        if (rate == null) continue;
+        otRows.push({
+          staffPhone: phone,
+          name: person ? person.name : phone,
+          weekStart,
+          overtimeHours: Number(over.toFixed(2)),
+          premium: Number((over * rate * ((rules.overtimeMultiplier || 1) - 1)).toFixed(2)),
+        });
+      }
+    }
+
+    const perStaff = {};
+    for (const r of rows) {
+      const t = (perStaff[r.staffPhone] = perStaff[r.staffPhone] || { name: r.name, hours: 0, pay: 0, missingRate: false });
+      t.hours += r.hours;
+      if (r.pay != null) t.pay += r.pay; else t.missingRate = true;
+    }
+    for (const o of otRows) {
+      const t = perStaff[o.staffPhone];
+      if (t) t.pay += o.premium;
+    }
+    const grand = Object.values(perStaff).reduce(
+      (g, t) => ({ hours: g.hours + t.hours, pay: g.pay + t.pay }), { hours: 0, pay: 0 }
+    );
+    res.json({ from, to, rows, otRows, perStaff, grand, rulesApplied: Boolean(rules) });
+  } catch (err) {
+    console.error("[reports] payroll failed:", err);
+    res.status(500).json({ error: "Failed to build the payroll report." });
+  }
+});
+
+/**
+ * GET /api/reports/pnl?week=YYYY-MM-DD — the weekly P&L summary: revenue,
+ * actual labour (amended-aware), food purchases / COGS, and the three
+ * percentages management steers by.
+ */
+app.get("/api/reports/pnl", requireDashboardKey, async (req, res) => {
+  try {
+    const week = String(req.query.week || "");
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(week)) {
+      return res.status(400).json({ error: "week must be YYYY-MM-DD (a Monday)." });
+    }
+    const endD = new Date(week + "T12:00:00");
+    endD.setDate(endD.getDate() + 7);
+    const weekEnd = endD.toISOString().slice(0, 10);
+
+    const [staff, venue, roster, shiftsRaw, purchasesAll] = await Promise.all([
+      staffStore.listByTenant(DASHBOARD_TENANT_ID),
+      tenantStore.findById(DASHBOARD_TENANT_ID),
+      rosterStore.getWeek(DASHBOARD_TENANT_ID, week),
+      shiftsStore.listRecentByTenant(DASHBOARD_TENANT_ID, week),
+      purchasesStore.listByTenant(DASHBOARD_TENANT_ID),
+    ]);
+    const rules = venue && venue.penaltyRules;
+
+    let labour = 0;
+    const wh = {};
+    for (const s of shiftsRaw) {
+      if (!s.clockOut || s.clockOut.denied) continue;
+      const eff = effectiveShift(s);
+      if (!eff.outIso) continue;
+      const dateIso = eff.inIso.slice(0, 10);
+      if (dateIso < week || dateIso >= weekEnd) continue;
+      const person = staff.find((x) => x.phone === s.staffPhone);
+      if (!person || person.wageRate == null) continue;
+      const hours = Math.max(0, (new Date(eff.outIso) - new Date(eff.inIso) - eff.breakMs) / 3600000);
+      labour += hours * Number(person.wageRate) * reportDayMultiplier(dateIso, rules);
+      wh[s.staffPhone] = (wh[s.staffPhone] || 0) + hours;
+    }
+    if (rules && rules.overtimeWeeklyHours) {
+      for (const [phone, hours] of Object.entries(wh)) {
+        const over = hours - rules.overtimeWeeklyHours;
+        if (over <= 0) continue;
+        const person = staff.find((x) => x.phone === phone);
+        if (person && person.wageRate != null) {
+          labour += over * Number(person.wageRate) * ((rules.overtimeMultiplier || 1) - 1);
+        }
+      }
+    }
+
+    const purchases = purchasesAll
+      .filter((p) => p.date >= week && p.date < weekEnd)
+      .reduce((sum, p) => sum + (Number(p.amount) || 0), 0);
+    const hasStocktake = roster.openingStock != null && roster.closingStock != null;
+    const cogs = hasStocktake ? Number(roster.openingStock) + purchases - Number(roster.closingStock) : purchases;
+    const revenue = roster.revenueForecast != null ? Number(roster.revenueForecast) : null;
+
+    const pct = (x) => (revenue > 0 ? Number(((x / revenue) * 100).toFixed(2)) : null);
+    res.json({
+      week, weekEnd,
+      revenue,
+      labourCost: Number(labour.toFixed(2)),
+      purchases: Number(purchases.toFixed(2)),
+      openingStock: roster.openingStock,
+      closingStock: roster.closingStock,
+      cogs: Number(cogs.toFixed(2)),
+      cogsBasis: hasStocktake ? "stocktake" : "purchases",
+      labourPct: pct(labour),
+      foodPct: pct(cogs),
+      primePct: revenue > 0 ? Number((((labour + cogs) / revenue) * 100).toFixed(2)) : null,
+    });
+  } catch (err) {
+    console.error("[reports] pnl failed:", err);
+    res.status(500).json({ error: "Failed to build the P&L report." });
+  }
+});
+
 // Simple liveness probe for the host / uptime checks.
 app.get("/health", (_req, res) => res.json({ ok: true, service: "hospitality-os", step: 2, backend }));
 

@@ -113,6 +113,24 @@ class InMemoryShiftsStore {
     }
     return shift;
   }
+
+  /**
+   * Timesheet amendment — audit-trail style: the original clockIn/clockOut/
+   * breaks are never touched; corrections live in `amended` and every
+   * consumer (dashboard, reports) uses amended values when present, while
+   * always able to show the original for comparison.
+   */
+  async amendShift(shiftId, { clockInTime, clockOutTime, breakMinutes }) {
+    const shift = this._shifts.get(shiftId);
+    if (!shift) throw new Error(`No shift found with id ${shiftId}`);
+    shift.amended = {
+      clockInTime: clockInTime || null,
+      clockOutTime: clockOutTime || null,
+      breakMinutes: breakMinutes != null ? breakMinutes : null,
+      at: new Date().toISOString(),
+    };
+    return shift;
+  }
 }
 
 /**
@@ -225,6 +243,21 @@ class FirestoreShiftsStore {
       const all = await this.listByTenant(tenantId);
       return all.filter((s) => s.clockIn && s.clockIn.time >= sinceIso);
     }
+  }
+
+  /** Timesheet amendment — see the in-memory twin for semantics. */
+  async amendShift(shiftId, { clockInTime, clockOutTime, breakMinutes }) {
+    const docRef = this.collection.doc(shiftId);
+    await docRef.update({
+      amended: {
+        clockInTime: clockInTime || null,
+        clockOutTime: clockOutTime || null,
+        breakMinutes: breakMinutes != null ? breakMinutes : null,
+        at: new Date().toISOString(),
+      },
+    });
+    const doc = await docRef.get();
+    return { shiftId, ...doc.data() };
   }
 
   /**

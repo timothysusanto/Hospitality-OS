@@ -8,9 +8,9 @@
   @import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=IBM+Plex+Mono:wght@400;500;600&family=Space+Grotesk:wght@400;500;600&display=swap');
 
   :root {
-    --steel: #16171A;
-    --panel: #1F2125;
-    --seam: #34373D;
+    --steel: #1B1D22;
+    --panel: #25282E;
+    --seam: #3A3E45;
     --cream: #F5EFDF;
     --ink: #2B2620;
     --ink-soft: #6E6555;
@@ -27,6 +27,8 @@
   body {
     margin: 0; background: var(--steel); color: var(--text);
     font-family: 'Space Grotesk', sans-serif; font-size: 15px;
+    line-height: 1.5;
+    -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale;
   }
   .bebas { font-family: 'Bebas Neue', sans-serif; letter-spacing: 0.05em; }
   .mono { font-family: 'IBM Plex Mono', monospace; }
@@ -225,7 +227,7 @@
   .cost-line input { width: 110px; }
   .pct-ok { color: var(--herb); font-weight: 600; }
   .pct-warn { color: var(--lamp); font-weight: 600; }
-  .cost-note { width: 100%; color: var(--dim); font-size: 11px; line-height: 1.5; }
+  .cost-note { width: 100%; color: var(--dim); font-size: 12.5px; line-height: 1.7; font-family: 'Space Grotesk', sans-serif; }
   .inline-msg { font-family: 'IBM Plex Mono', monospace; font-size: 12px; margin-top: 10px; min-height: 16px; }
   .inline-msg .ok { color: var(--herb); }
   .inline-msg .fail { color: var(--red86); }
@@ -266,7 +268,7 @@
     padding: 9px 18px; border: none; border-radius: 6px; cursor: pointer;
     background: var(--herb-deep); color: var(--cream); font-family: 'IBM Plex Mono', monospace; font-size: 12px; font-weight: 600;
   }
-  .pen-note { color: var(--dim); font-size: 11px; line-height: 1.6; margin-top: 14px; font-family: 'IBM Plex Mono', monospace; }
+  .pen-note { color: var(--dim); font-size: 12.5px; line-height: 1.7; margin-top: 14px; font-family: 'Space Grotesk', sans-serif; max-width: 72ch; }
   .pen-note strong { color: var(--text); }
 
   /* ---------- Crew + closed dockets ---------- */
@@ -276,14 +278,20 @@
   }
   .add-btn:hover { border-color: var(--lamp); color: var(--lamp); }
   .table-wrap { border: 1px solid var(--seam); border-radius: 8px; overflow-x: auto; background: var(--panel); }
-  table.data { width: 100%; border-collapse: collapse; font-family: 'IBM Plex Mono', monospace; font-size: 13px; }
+  table.data {
+    width: 100%; border-collapse: collapse;
+    font-family: 'Space Grotesk', sans-serif; font-size: 14px;
+    font-variant-numeric: tabular-nums;
+  }
   table.data th {
     text-align: left; padding: 11px 16px; font-size: 10px; text-transform: uppercase;
     letter-spacing: 0.06em; color: var(--dim); font-weight: 500; border-bottom: 1px dashed var(--seam);
+    font-family: 'IBM Plex Mono', monospace;
   }
-  table.data td { padding: 10px 16px; border-bottom: 1px dashed #2A2C31; }
+  table.data td { padding: 11px 16px; border-bottom: 1px dashed #2E3138; }
   table.data tr:last-child td { border-bottom: none; }
-  td.dur { color: var(--herb); font-weight: 600; }
+  td.dur { color: var(--herb); font-weight: 600; font-family: 'IBM Plex Mono', monospace; font-size: 13px; }
+  td.amt { font-family: 'IBM Plex Mono', monospace; font-size: 13px; }
 
   /* ---------- Modal ---------- */
   .overlay {
@@ -319,7 +327,7 @@
   .stock-row { display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-end; margin-top: 16px; }
   .stock-row .field { margin: 0; }
   .stock-row input { width: 130px; }
-  .stock-note { color: var(--dim); font-size: 11px; font-family: 'IBM Plex Mono', monospace; margin-top: 10px; line-height: 1.5; }
+  .stock-note { color: var(--dim); font-size: 12.5px; font-family: 'Space Grotesk', sans-serif; margin-top: 10px; line-height: 1.7; max-width: 72ch; }
   td.amt { text-align: right; font-weight: 600; }
   .del-btn {
     background: transparent; border: none; color: var(--dim); cursor: pointer; font-size: 14px; padding: 2px 6px;
@@ -347,7 +355,7 @@
   .compact-row .c-time { color: var(--herb-deep); font-weight: 600; }
   .crew-search { margin-bottom: 12px; }
   .crew-search input { width: 260px; max-width: 100%; }
-  .scale-note { font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: var(--dim); margin-top: 8px; }
+  .scale-note { font-family: 'Space Grotesk', sans-serif; font-size: 12.5px; color: var(--dim); margin-top: 8px; }
 
   /* ---------- Motion ---------- */
   @media (prefers-reduced-motion: no-preference) {

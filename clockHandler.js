@@ -12,27 +12,25 @@ const { checkGeofence } = require("./geofence");
  *
  * Breaks don't need a location share (staff is already on-site) — "break"
  * and "back" act immediately on the text message alone.
+ *
+ * Every function here takes a `sendOpts` param, forwarded straight to
+ * whatsapp.js — {} in a single-venue deployment (falls back to env vars),
+ * or {phoneNumberId, token} once a venue has its own WhatsApp number.
  */
 
-/**
- * Step 1: staff texts "in" or "out".
- */
-async function requestClockAction(from, action, deps) {
+async function requestClockAction(from, action, deps, sendOpts = {}) {
   deps.pendingActions.set(from, action);
   const label = action === "clock_in" ? "clock in" : "clock out";
-  await sendLocationRequest(from, `Share your location to ${label}.`);
+  await sendLocationRequest(from, `Share your location to ${label}.`, sendOpts);
 }
 
-/**
- * Step 2: staff shares a location, and we had a pending action for them.
- */
-async function handleLocationForClockAction(from, staff, location, action, deps) {
+async function handleLocationForClockAction(from, staff, location, action, deps, sendOpts = {}) {
   const { tenantStore, shiftsStore, pendingActions } = deps;
 
   const venue = await tenantStore.findById(staff.tenantId);
   if (!venue || !venue.geofence) {
     console.error(`[clock] no geofence configured for tenant ${staff.tenantId}`);
-    await sendText(from, "Something's not set up right on our end — please tell your manager: no venue location configured.");
+    await sendText(from, "Something's not set up right on our end — please tell your manager: no venue location configured.", sendOpts);
     pendingActions.clear(from);
     return;
   }
@@ -50,7 +48,8 @@ async function handleLocationForClockAction(from, staff, location, action, deps)
       await sendText(
         from,
         `You look to be about ${result.distanceMeters}m from the venue, which is outside the clock-in range. ` +
-          `I've flagged this for your manager to review — they can approve it if needed.`
+          `I've flagged this for your manager to review — they can approve it if needed.`,
+        sendOpts
       );
       return;
     }
@@ -67,19 +66,19 @@ async function handleLocationForClockAction(from, staff, location, action, deps)
         distanceMeters: result.distanceMeters,
       },
     });
-    await sendText(from, `Clocked in, ${staff.name} — have a good shift! (${shiftId})`);
+    await sendText(from, `Clocked in, ${staff.name} — have a good shift! (${shiftId})`, sendOpts);
     return;
   }
 
   // action === "clock_out"
   const openShift = await shiftsStore.findOpenShift(from);
   if (!openShift) {
-    await sendText(from, 'I don\'t see an open shift for you to clock out of. Message "in" if you haven\'t clocked in yet.');
+    await sendText(from, 'I don\'t see an open shift for you to clock out of. Message "in" if you haven\'t clocked in yet.', sendOpts);
     return;
   }
 
   if (hasActiveBreak(openShift)) {
-    await sendText(from, 'You\'re still on break — message "back" to end your break before clocking out.');
+    await sendText(from, 'You\'re still on break — message "back" to end your break before clocking out.', sendOpts);
     return;
   }
 
@@ -93,41 +92,34 @@ async function handleLocationForClockAction(from, staff, location, action, deps)
 
   const workedMs = shiftDurationMinusBreaks(openShift, Date.now());
   const hours = (workedMs / 1000 / 60 / 60).toFixed(1);
-  await sendText(from, `Clocked out, ${staff.name} — that was a ${hours}hr shift. See you next time!`);
+  await sendText(from, `Clocked out, ${staff.name} — that was a ${hours}hr shift. See you next time!`, sendOpts);
 }
 
-/**
- * Staff texts "break" — starts a break on their currently open shift.
- * No location needed; they're already on-site for an open shift to exist.
- */
-async function startBreak(from, staff, deps) {
+async function startBreak(from, staff, deps, sendOpts = {}) {
   const { shiftsStore } = deps;
   const openShift = await shiftsStore.findOpenShift(from);
   if (!openShift) {
-    await sendText(from, 'You\'re not clocked in right now, so there\'s no shift to take a break from. Message "in" first.');
+    await sendText(from, 'You\'re not clocked in right now, so there\'s no shift to take a break from. Message "in" first.', sendOpts);
     return;
   }
   if (hasActiveBreak(openShift)) {
-    await sendText(from, "You're already on break — message \"back\" when you're ready to resume.");
+    await sendText(from, "You're already on break — message \"back\" when you're ready to resume.", sendOpts);
     return;
   }
   try {
     await shiftsStore.startBreak(openShift.shiftId, new Date().toISOString());
-    await sendText(from, `Break started, ${staff.name} — message "back" when you're back on the floor.`);
+    await sendText(from, `Break started, ${staff.name} — message "back" when you're back on the floor.`, sendOpts);
   } catch (err) {
     console.error("[break] failed to start break:", err);
-    await sendText(from, "Couldn't start your break just now — please try again in a moment.");
+    await sendText(from, "Couldn't start your break just now — please try again in a moment.", sendOpts);
   }
 }
 
-/**
- * Staff texts "back" — ends the active break on their currently open shift.
- */
-async function endBreak(from, staff, deps) {
+async function endBreak(from, staff, deps, sendOpts = {}) {
   const { shiftsStore } = deps;
   const openShift = await shiftsStore.findOpenShift(from);
   if (!openShift || !hasActiveBreak(openShift)) {
-    await sendText(from, 'You\'re not currently on a break. Message "break" to start one, or "out" to clock out.');
+    await sendText(from, 'You\'re not currently on a break. Message "break" to start one, or "out" to clock out.', sendOpts);
     return;
   }
   try {
@@ -135,25 +127,19 @@ async function endBreak(from, staff, deps) {
     const breaks = updated.breaks || [];
     const last = breaks[breaks.length - 1];
     const breakMinutes = Math.round((new Date(last.end) - new Date(last.start)) / 1000 / 60);
-    await sendText(from, `Welcome back, ${staff.name} — that was a ${breakMinutes} min break.`);
+    await sendText(from, `Welcome back, ${staff.name} — that was a ${breakMinutes} min break.`, sendOpts);
   } catch (err) {
     console.error("[break] failed to end break:", err);
-    await sendText(from, "Couldn't end your break just now — please try again in a moment.");
+    await sendText(from, "Couldn't end your break just now — please try again in a moment.", sendOpts);
   }
 }
 
-/** @returns {boolean} true if the shift's most recent break has no `end` yet */
 function hasActiveBreak(shift) {
   const breaks = shift.breaks || [];
   const last = breaks[breaks.length - 1];
   return Boolean(last && !last.end);
 }
 
-/**
- * Total shift duration from clockIn to `nowMs`, minus the total time spent
- * on completed breaks. An active break (shouldn't happen — clock-out blocks
- * on it — but defensively) is not subtracted since it has no end yet.
- */
 function shiftDurationMinusBreaks(shift, nowMs) {
   const totalMs = nowMs - new Date(shift.clockIn.time).getTime();
   const breaks = shift.breaks || [];
@@ -164,10 +150,6 @@ function shiftDurationMinusBreaks(shift, nowMs) {
   return Math.max(0, totalMs - breakMs);
 }
 
-/**
- * Records an out-of-radius clock-in attempt so the manager dashboard has
- * something to show and approve.
- */
 async function recordFlaggedAttempt(shiftsStore, staff, location, result) {
   try {
     await shiftsStore.openShift({

@@ -15,11 +15,15 @@ const GRAPH_VERSION = "v21.0";
  *
  * @param {string} to    Recipient phone number in international format, no "+" (e.g. "61412345678")
  * @param {string} body  Message text
+ * @param {{phoneNumberId?: string, token?: string}} [options]  Per-tenant overrides —
+ *   used for multi-venue setups where each tenant has their own WhatsApp
+ *   number/token. Falls back to the single-venue env vars if omitted, so
+ *   existing single-tenant deployments keep working unchanged.
  * @returns {Promise<object>} WhatsApp API response JSON
  */
-async function sendText(to, body) {
-  const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID;
-  const token = process.env.WHATSAPP_TOKEN;
+async function sendText(to, body, options = {}) {
+  const phoneNumberId = options.phoneNumberId || process.env.WHATSAPP_PHONE_NUMBER_ID;
+  const token = options.token || process.env.WHATSAPP_TOKEN;
 
   if (!phoneNumberId || !token) {
     throw new Error(
@@ -62,10 +66,11 @@ async function sendText(to, body) {
  *
  * @param {string} to    Recipient phone number, international format, no "+"
  * @param {string} body  The message shown above the button
+ * @param {{phoneNumberId?: string, token?: string}} [options]  Per-tenant overrides, see sendText.
  */
-async function sendLocationRequest(to, body) {
-  const phoneNumberId = process.env.WHATSAPP_PHONE_NUMBER_ID;
-  const token = process.env.WHATSAPP_TOKEN;
+async function sendLocationRequest(to, body, options = {}) {
+  const phoneNumberId = options.phoneNumberId || process.env.WHATSAPP_PHONE_NUMBER_ID;
+  const token = options.token || process.env.WHATSAPP_TOKEN;
 
   if (!phoneNumberId || !token) {
     throw new Error(

@@ -4,6 +4,8 @@ const { getFirestoreDb } = require("./firebase");
 const { InMemoryStaffStore, FirestoreStaffStore } = require("./store");
 const { InMemoryTenantStore, FirestoreTenantStore } = require("./tenantStore");
 const { InMemoryShiftsStore, FirestoreShiftsStore } = require("./shiftsStore");
+const { InMemoryRosterStore, FirestoreRosterStore } = require("./rosterStore");
+const { InMemoryPurchasesStore, FirestorePurchasesStore } = require("./purchasesStore");
 
 /**
  * One place that decides: real Firestore, or in-memory for early testing.
@@ -18,6 +20,8 @@ function buildStores() {
       staffStore: new FirestoreStaffStore(db),
       tenantStore: new FirestoreTenantStore(db),
       shiftsStore: new FirestoreShiftsStore(db),
+      rosterStore: new FirestoreRosterStore(db),
+      purchasesStore: new FirestorePurchasesStore(db),
       backend: "firestore",
     };
   }
@@ -26,6 +30,8 @@ function buildStores() {
     staffStore: new InMemoryStaffStore(),
     tenantStore: new InMemoryTenantStore(),
     shiftsStore: new InMemoryShiftsStore(),
+    rosterStore: new InMemoryRosterStore(),
+    purchasesStore: new InMemoryPurchasesStore(),
     backend: "in-memory",
   };
 }

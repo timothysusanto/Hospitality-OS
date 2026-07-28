@@ -41,6 +41,36 @@ class InMemoryStaffStore {
   async listByTenant(tenantId) {
     return [...this._staff.values()].filter((s) => s.tenantId === tenantId);
   }
+
+  /**
+   * Sets recurring weekly availability, e.g. ["mon","tue","fri"].
+   * Empty array = explicitly available on no recurring days.
+   */
+  async setAvailabilityDays(phone, days) {
+    const staff = this._staff.get(phone);
+    if (!staff) throw new Error("STAFF_NOT_FOUND");
+    staff.availability = staff.availability || { days: [], exceptions: [] };
+    staff.availability.days = days;
+    return staff;
+  }
+
+  /**
+   * Adds or removes a one-off date exception ("off 3/8" / "on 3/8").
+   * @param {string} phone @param {string} dateIso YYYY-MM-DD
+   * @param {boolean} available false = mark unavailable, true = clear it
+   */
+  async setDateException(phone, dateIso, available) {
+    const staff = this._staff.get(phone);
+    if (!staff) throw new Error("STAFF_NOT_FOUND");
+    staff.availability = staff.availability || { days: [], exceptions: [] };
+    staff.availability.exceptions = (staff.availability.exceptions || []).filter(
+      (e) => e.date !== dateIso
+    );
+    if (!available) {
+      staff.availability.exceptions.push({ date: dateIso, available: false });
+    }
+    return staff;
+  }
 }
 
 /**
@@ -77,6 +107,29 @@ class FirestoreStaffStore {
   async listByTenant(tenantId) {
     const snap = await this.collection.where("tenantId", "==", tenantId).get();
     return snap.docs.map((doc) => ({ phone: doc.id, ...doc.data() }));
+  }
+
+  async setAvailabilityDays(phone, days) {
+    const ref = this.collection.doc(phone);
+    const doc = await ref.get();
+    if (!doc.exists) throw new Error("STAFF_NOT_FOUND");
+    const availability = doc.data().availability || { days: [], exceptions: [] };
+    availability.days = days;
+    await ref.update({ availability });
+    return { phone, ...doc.data(), availability };
+  }
+
+  async setDateException(phone, dateIso, available) {
+    const ref = this.collection.doc(phone);
+    const doc = await ref.get();
+    if (!doc.exists) throw new Error("STAFF_NOT_FOUND");
+    const availability = doc.data().availability || { days: [], exceptions: [] };
+    availability.exceptions = (availability.exceptions || []).filter((e) => e.date !== dateIso);
+    if (!available) {
+      availability.exceptions.push({ date: dateIso, available: false });
+    }
+    await ref.update({ availability });
+    return { phone, ...doc.data(), availability };
   }
 }
 

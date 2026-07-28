@@ -83,6 +83,18 @@ class InMemoryShiftsStore {
     return [...this._shifts.values()].filter((s) => s.tenantId === tenantId);
   }
 
+  /** Every open (not clocked out) shift for a tenant, however old. */
+  async listOpenByTenant(tenantId) {
+    return [...this._shifts.values()].filter((s) => s.tenantId === tenantId && !s.clockOut);
+  }
+
+  /** Shifts whose clock-in is on/after sinceIso. */
+  async listRecentByTenant(tenantId, sinceIso) {
+    return [...this._shifts.values()].filter(
+      (s) => s.tenantId === tenantId && s.clockIn && s.clockIn.time >= sinceIso
+    );
+  }
+
   /**
    * Manager approves or denies a flagged out-of-radius clock-in.
    * Approve: clears the flag, marks it within radius, leaves the shift open.
@@ -178,6 +190,41 @@ class FirestoreShiftsStore {
   async listByTenant(tenantId) {
     const snap = await this.collection.where("tenantId", "==", tenantId).get();
     return snap.docs.map((doc) => ({ shiftId: doc.id, ...doc.data() }));
+  }
+
+  /**
+   * Every open shift for a tenant. Two equality filters — Firestore serves
+   * these by merging single-field indexes, so no composite index needed.
+   */
+  async listOpenByTenant(tenantId) {
+    const snap = await this.collection
+      .where("tenantId", "==", tenantId)
+      .where("clockOut", "==", null)
+      .get();
+    return snap.docs.map((doc) => ({ shiftId: doc.id, ...doc.data() }));
+  }
+
+  /**
+   * Shifts clocked in on/after sinceIso. Equality + range DOES need a
+   * composite index (tenantId asc, clockIn.time asc) — at large-tenant
+   * scale, create it via the link Firestore logs. Until then we fall back
+   * to the full fetch + JS filter, so small deployments need zero setup.
+   */
+  async listRecentByTenant(tenantId, sinceIso) {
+    try {
+      const snap = await this.collection
+        .where("tenantId", "==", tenantId)
+        .where("clockIn.time", ">=", sinceIso)
+        .get();
+      return snap.docs.map((doc) => ({ shiftId: doc.id, ...doc.data() }));
+    } catch (err) {
+      console.warn(
+        "[shifts] recent-range query needs a composite index (tenantId + clockIn.time) for large tenants — " +
+        "falling back to full fetch. Create the index via the link in this error:", err.message
+      );
+      const all = await this.listByTenant(tenantId);
+      return all.filter((s) => s.clockIn && s.clockIn.time >= sinceIso);
+    }
   }
 
   /**

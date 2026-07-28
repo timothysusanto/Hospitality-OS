@@ -3,172 +3,540 @@
 <head>
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-<title>HospitalityOS — Kitchen Pass</title>
+<title>Kitchen Pass — HospitalityOS</title>
 <style>
-  @import url('https://fonts.googleapis.com/css2?family=Oswald:wght@500;700&family=IBM+Plex+Mono:wght@400;500;600&family=Inter:wght@400;500;600&display=swap');
+  @import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=IBM+Plex+Mono:wght@400;500;600&family=Space+Grotesk:wght@400;500;600&display=swap');
 
   :root {
-    --bg: #1B1D1F;
-    --panel: #26292C;
-    --line: #3A3E42;
-    --ticket: #F3EEE2;
-    --ink: #2A2622;
-    --ink-soft: #6B6558;
-    --ink-faint: #8A8477;
-    --ember: #E2661C;
-    --ember-dark: #8a1f1f;
-    --herb: #5C8A5A;
-    --herb-dark: #3E6B41;
-    --text: #EDEAE3;
-    --text-dim: #8A8F94;
+    --steel: #16171A;
+    --panel: #1F2125;
+    --seam: #34373D;
+    --cream: #F5EFDF;
+    --ink: #2B2620;
+    --ink-soft: #6E6555;
+    --lamp: #FFB454;
+    --lamp-deep: #D98324;
+    --herb: #6FA36B;
+    --herb-deep: #4C7A49;
+    --red86: #C4453C;
+    --text: #E9E5DA;
+    --dim: #8D9199;
   }
   * { box-sizing: border-box; }
+  html { scroll-behavior: smooth; }
   body {
-    margin: 0;
-    background: var(--bg);
-    color: var(--text);
-    font-family: 'Inter', sans-serif;
-    padding: 32px 16px 60px;
+    margin: 0; background: var(--steel); color: var(--text);
+    font-family: 'Space Grotesk', sans-serif; font-size: 15px;
   }
-  .display { font-family: 'Oswald', sans-serif; letter-spacing: 0.02em; }
+  .bebas { font-family: 'Bebas Neue', sans-serif; letter-spacing: 0.05em; }
   .mono { font-family: 'IBM Plex Mono', monospace; }
+  button { font-family: inherit; }
+  button:focus-visible, input:focus-visible, select:focus-visible {
+    outline: 2px solid var(--lamp); outline-offset: 2px;
+  }
+  input, select {
+    background: var(--steel); border: 1px solid var(--seam); border-radius: 6px;
+    color: var(--text); font-family: 'IBM Plex Mono', monospace; font-size: 13px;
+    padding: 8px 10px;
+  }
 
-  .wrap { max-width: 1200px; margin: 0 auto; }
+  /* ---------- The heat lamp (signature) ---------- */
+  .lamp-zone { position: relative; }
+  .lamp-fixture {
+    position: absolute; top: -6px; left: 50%; transform: translateX(-50%);
+    width: 190px; height: 12px; border-radius: 0 0 10px 10px;
+    background: linear-gradient(180deg, #3A3D43, #222428 90%);
+    border: 1px solid #45484F; border-top: none;
+    z-index: 2;
+  }
+  .lamp-fixture::after {
+    content: ""; position: absolute; left: 12px; right: 12px; bottom: -3px; height: 4px;
+    border-radius: 3px; background: var(--lamp);
+    box-shadow: 0 0 14px 3px rgba(255, 180, 84, 0.65);
+  }
+  .lamp-glow {
+    position: absolute; inset: 0; pointer-events: none; z-index: 0;
+    background: radial-gradient(ellipse 75% 130% at 50% -8%,
+      rgba(255, 180, 84, 0.20), rgba(255, 180, 84, 0.07) 42%, transparent 70%);
+    opacity: 0;
+  }
+  .lit .lamp-glow { opacity: 1; transition: opacity 1.4s ease; }
 
+  /* ---------- Docket stamp section headers ---------- */
+  .stamp {
+    display: flex; align-items: center; gap: 14px; margin: 0 0 18px;
+  }
+  .stamp h2 {
+    margin: 0; font-family: 'IBM Plex Mono', monospace; font-weight: 600;
+    font-size: 12px; letter-spacing: 0.12em; color: var(--dim); text-transform: uppercase;
+    white-space: nowrap;
+  }
+  .stamp h2::before, .stamp h2::after { content: "\2731\2009\2731\2009\2731"; color: var(--seam); font-size: 10px; }
+  .stamp h2::before { margin-right: 10px; }
+  .stamp h2::after { margin-left: 10px; }
+  .stamp .rule { flex: 1; border-top: 1px dashed var(--seam); }
+  .stamp .spacer { flex: 1; }
+
+  /* ---------- Layout ---------- */
+  .wrap { max-width: 1180px; margin: 0 auto; padding: 0 20px 80px; }
+  section { margin-top: 56px; }
+
+  /* ---------- Gate ---------- */
+  #gate {
+    min-height: 100vh; display: flex; flex-direction: column;
+    align-items: center; justify-content: center; position: relative; overflow: hidden;
+  }
+  #gate .lamp-glow { opacity: 1; }
+  #gate h1 { font-size: 64px; margin: 18px 0 4px; color: var(--cream); font-weight: 400; }
+  #gate p { margin: 0 0 28px; color: var(--dim); font-size: 13px; }
+  #gate .card { position: relative; z-index: 1; text-align: center; padding: 0 20px; }
+  #gate input { width: 260px; text-align: center; font-size: 15px; padding: 11px 12px; }
+  #gate button {
+    display: block; width: 260px; margin: 12px auto 0; padding: 12px 0;
+    background: var(--lamp); color: #201400; border: none; border-radius: 6px;
+    font-family: 'IBM Plex Mono', monospace; font-weight: 600; font-size: 14px; cursor: pointer;
+  }
+  #gate button:hover { background: #FFC275; }
+  #gate .err { color: var(--red86); font-size: 12px; min-height: 18px; margin-top: 12px; }
+
+  /* ---------- Header ---------- */
   header {
-    display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between;
-    gap: 12px; padding-bottom: 24px; margin-bottom: 32px; border-bottom: 1px solid var(--line);
+    display: flex; flex-wrap: wrap; align-items: baseline; gap: 8px 22px;
+    padding: 26px 0 18px; border-bottom: 1px solid var(--seam);
   }
-  .brand { display: flex; align-items: center; gap: 12px; }
-  .brand-icon {
-    width: 44px; height: 44px; border-radius: 50%; background: var(--panel);
-    border: 1px solid var(--line); display: flex; align-items: center; justify-content: center;
-    font-size: 20px;
-  }
-  h1 { font-size: 26px; font-weight: 700; text-transform: uppercase; margin: 0; color: var(--ticket); }
-  .subline { font-size: 12px; color: var(--text-dim); margin: 2px 0 0; }
-  .badges { display: flex; gap: 10px; flex-wrap: wrap; }
+  header .brand { font-size: 40px; color: var(--cream); line-height: 1; }
+  header .venue { color: var(--dim); font-size: 13px; }
+  header .grow { flex: 1; }
+  #serviceClock { font-size: 26px; color: var(--lamp); letter-spacing: 0.08em; }
+  .badges { display: flex; gap: 10px; width: 100%; margin-top: 6px; }
   .badge {
-    display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-radius: 6px;
-    background: var(--panel); border: 1px solid var(--line); font-size: 13px;
+    font-family: 'IBM Plex Mono', monospace; font-size: 12px;
+    padding: 6px 12px; border-radius: 999px; border: 1px solid var(--seam); color: var(--dim);
   }
-  .badge.warn { background: #3A2418; border-color: var(--ember); color: #F0A66A; }
-  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--herb); display: inline-block; }
+  .badge .dot { display: inline-block; width: 7px; height: 7px; border-radius: 50%; background: var(--herb); margin-right: 7px; }
+  .badge.alert { border-color: var(--lamp-deep); color: var(--lamp); }
 
-  h2.section {
-    font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em;
-    color: var(--text-dim); margin: 0 0 16px;
+  /* ---------- The rail + tickets ---------- */
+  .rail-zone { padding-top: 34px; }
+  .rail {
+    height: 7px; border-radius: 4px; margin-bottom: 26px;
+    background: linear-gradient(180deg, #4A4E55, #26282C);
+    border: 1px solid #55585F; border-bottom-color: #1A1B1E;
   }
-  .section.warn-title { color: var(--ember); }
+  .tickets { display: flex; flex-wrap: wrap; gap: 22px; align-items: flex-start; }
+  .ticket {
+    position: relative; width: 188px; padding: 20px 16px 24px; margin-top: -14px;
+    background: var(--cream); color: var(--ink);
+    box-shadow: 0 10px 22px rgba(0,0,0,0.45);
+    clip-path: polygon(0 0,100% 0,100% 93%,94% 97%,88% 93%,82% 97%,76% 93%,70% 97%,64% 93%,58% 97%,52% 93%,46% 97%,40% 93%,34% 97%,28% 93%,22% 97%,16% 93%,10% 97%,4% 93%,0 97%);
+  }
+  .ticket .clip {
+    position: absolute; top: -9px; left: 50%; transform: translateX(-50%);
+    width: 22px; height: 14px; border-radius: 3px;
+    background: linear-gradient(180deg, #6B6F77, #3B3E44);
+    border: 1px solid #7A7E86;
+  }
+  .ticket .name { font-family: 'Bebas Neue', sans-serif; font-size: 22px; letter-spacing: 0.04em; }
+  .ticket .dept { font-family: 'IBM Plex Mono', monospace; font-size: 10px; text-transform: uppercase; color: var(--ink-soft); margin: 2px 0 12px; }
+  .ticket .elapsed { font-family: 'IBM Plex Mono', monospace; font-size: 15px; font-weight: 600; color: var(--herb-deep); }
+  .ticket .since { font-family: 'IBM Plex Mono', monospace; font-size: 10px; color: var(--ink-soft); margin-top: 3px; }
+  .ticket .divider { border-top: 1px dashed #CFC5AE; margin: 10px 0; }
+  .ticket .dist { font-family: 'IBM Plex Mono', monospace; font-size: 12px; font-weight: 600; color: var(--red86); }
+  .ticket .tag {
+    position: absolute; top: 10px; right: 10px; font-family: 'IBM Plex Mono', monospace;
+    font-size: 9px; font-weight: 600; padding: 2px 6px; border-radius: 3px;
+    background: var(--red86); color: var(--cream);
+  }
+  .ticket .actions { display: flex; gap: 8px; margin-top: 12px; }
+  .ticket .actions button {
+    flex: 1; padding: 8px 0; border-radius: 5px; cursor: pointer;
+    font-family: 'IBM Plex Mono', monospace; font-size: 12px; font-weight: 600;
+  }
+  .ticket .approve { background: var(--herb-deep); color: var(--cream); border: none; }
+  .ticket .cut { background: transparent; color: var(--red86); border: 1px solid var(--red86); }
+  .ticket button:disabled { opacity: 0.5; cursor: default; }
 
-  .cols { display: grid; grid-template-columns: 2fr 1fr; gap: 32px; margin-bottom: 40px; }
-  @media (max-width: 800px) { .cols { grid-template-columns: 1fr; } }
+  .pass-cols { display: grid; grid-template-columns: 1.7fr 1fr; gap: 40px; }
+  @media (max-width: 860px) { .pass-cols { grid-template-columns: 1fr; } }
 
   .empty {
-    padding: 24px; border-radius: 6px; border: 1px dashed var(--line);
-    background: var(--panel); color: var(--text-dim); font-size: 13px; text-align: center;
+    padding: 26px; border: 1px dashed var(--seam); border-radius: 8px;
+    color: var(--dim); font-size: 13px; text-align: center; background: var(--panel);
   }
 
-  .tickets { display: flex; flex-wrap: wrap; gap: 20px; }
-  .ticket {
-    background: var(--ticket); color: var(--ink); width: 190px; padding: 18px 16px 22px;
-    box-shadow: 0 6px 14px rgba(0,0,0,0.35); position: relative;
-    clip-path: polygon(0% 0%, 100% 0%, 100% 92%, 94% 96%, 88% 92%, 82% 96%, 76% 92%, 70% 96%,
-      64% 92%, 58% 96%, 52% 92%, 46% 96%, 40% 92%, 34% 96%, 28% 92%, 22% 96%, 16% 92%,
-      10% 96%, 4% 92%, 0% 96%);
+  /* ---------- Service board (roster) ---------- */
+  .board-controls { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .week-nav {
+    width: 32px; height: 32px; border-radius: 6px; cursor: pointer;
+    background: var(--panel); border: 1px solid var(--seam); color: var(--text); font-size: 15px;
   }
-  .pin {
-    position: absolute; top: 8px; left: 50%; transform: translateX(-50%);
-    width: 10px; height: 10px; border-radius: 50%; background: var(--ember-dark);
-    box-shadow: 0 1px 2px rgba(0,0,0,0.4);
+  .week-label { font-family: 'IBM Plex Mono', monospace; font-size: 13px; min-width: 148px; text-align: center; }
+  .publish-btn {
+    margin-left: auto; padding: 9px 18px; border: none; border-radius: 6px; cursor: pointer;
+    background: var(--lamp); color: #201400; font-family: 'IBM Plex Mono', monospace; font-size: 12px; font-weight: 600;
   }
-  .pin.flag { background: var(--ember); }
-  .t-name { font-size: 16px; font-weight: 700; text-transform: uppercase; margin: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-  .t-dept { font-size: 11px; text-transform: uppercase; color: var(--ink-soft); margin: 0 0 12px; }
-  .t-time { display: flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; color: var(--herb-dark); margin-bottom: 2px; }
-  .t-sub { font-size: 10px; color: var(--ink-faint); margin: 0; }
+  .publish-btn:hover { background: #FFC275; }
+  .publish-btn:disabled { opacity: 0.6; cursor: default; }
+  .board-wrap { border: 1px solid var(--seam); border-radius: 8px; overflow-x: auto; margin-top: 16px; background: var(--panel); }
+  .board { width: 100%; min-width: 660px; border-collapse: collapse; font-family: 'IBM Plex Mono', monospace; font-size: 12px; }
+  .board th {
+    padding: 10px 6px; text-align: center; font-size: 10px; text-transform: uppercase;
+    letter-spacing: 0.06em; color: var(--dim); font-weight: 500; border-bottom: 1px solid var(--seam);
+  }
+  .board th:first-child { text-align: left; padding-left: 16px; }
+  .board td { padding: 5px; text-align: center; }
+  .board td.crew-cell { text-align: left; padding: 8px 8px 8px 16px; white-space: nowrap; }
+  .cell {
+    width: 100%; height: 40px; border: none; border-radius: 6px; cursor: pointer;
+    font-family: 'IBM Plex Mono', monospace; font-size: 11px; font-weight: 600;
+    background: var(--steel); color: var(--dim);
+  }
+  .cell:hover { box-shadow: inset 0 0 0 1px var(--seam); }
+  .cell.avail { background: #1E2A1D; }
+  .cell.unavail { background: #2E1B1A; }
+  .cell.slot-AM { background: #7A5716; color: #FFE9BE; }
+  .cell.slot-PM { background: #3F3663; color: #DFD6F7; }
+  .cell.slot-ALL { background: var(--herb-deep); color: #E2F0E1; }
+  .cell.conflict { box-shadow: inset 0 0 0 2px var(--lamp); }
+  .legend { display: flex; gap: 16px; flex-wrap: wrap; margin-top: 10px; font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: var(--dim); }
+  .chip { display: inline-block; width: 12px; height: 12px; border-radius: 3px; vertical-align: -1px; margin-right: 6px; }
 
-  .flag-card { background: var(--ticket); color: var(--ink); padding: 18px 16px 24px; box-shadow: 0 6px 14px rgba(0,0,0,0.35); position: relative; margin-bottom: 16px;
-    clip-path: polygon(0% 0%, 100% 0%, 100% 92%, 94% 96%, 88% 92%, 82% 96%, 76% 92%, 70% 96%,
-      64% 92%, 58% 96%, 52% 92%, 46% 96%, 40% 92%, 34% 96%, 28% 92%, 22% 96%, 16% 92%,
-      10% 96%, 4% 92%, 0% 96%);
+  .cost-line {
+    display: flex; flex-wrap: wrap; align-items: center; gap: 16px 26px; margin-top: 16px;
+    padding: 14px 18px; border: 1px solid var(--seam); border-radius: 8px; background: var(--panel);
+    font-family: 'IBM Plex Mono', monospace; font-size: 13px;
   }
-  .flag-top { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
-  .flag-badge { font-size: 10px; font-weight: 600; padding: 2px 6px; border-radius: 4px; background: var(--ember-dark); color: var(--ticket); white-space: nowrap; }
-  .flag-dist { display: flex; align-items: center; gap: 6px; margin-top: 12px; font-size: 13px; font-weight: 600; color: var(--ember-dark); }
-  .flag-actions { display: flex; gap: 8px; margin-top: 16px; }
-  .btn { flex: 1; font-family: 'IBM Plex Mono', monospace; font-size: 12px; font-weight: 600; padding: 7px 0; border-radius: 4px; border: none; cursor: pointer; }
-  .btn.approve { background: var(--herb); color: var(--ticket); }
-  .btn.deny { background: transparent; color: var(--ember-dark); border: 1px solid var(--ember-dark); }
-  .btn:disabled { opacity: 0.5; cursor: default; }
+  #rosterCost { font-size: 24px; font-weight: 600; color: var(--cream); transition: color 0.3s; }
+  .cost-line label { color: var(--dim); font-size: 11px; text-transform: uppercase; margin-right: 6px; }
+  .cost-line input { width: 110px; }
+  .pct-ok { color: var(--herb); font-weight: 600; }
+  .pct-warn { color: var(--lamp); font-weight: 600; }
+  .cost-note { width: 100%; color: var(--dim); font-size: 11px; line-height: 1.5; }
+  .inline-msg { font-family: 'IBM Plex Mono', monospace; font-size: 12px; margin-top: 10px; min-height: 16px; }
+  .inline-msg .ok { color: var(--herb); }
+  .inline-msg .fail { color: var(--red86); }
 
-  table { width: 100%; border-collapse: collapse; font-family: 'IBM Plex Mono', monospace; font-size: 13px; }
-  .table-wrap { border: 1px solid var(--line); border-radius: 6px; overflow: hidden; }
-  th { text-align: left; font-weight: 500; padding: 10px 16px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.03em; background: var(--panel); color: var(--text-dim); }
-  td { padding: 10px 16px; border-top: 1px solid #2C2F32; }
-  tr:nth-child(even) td { background: #1F2224; }
-  tr:nth-child(odd) td { background: var(--bg); }
-  .dur { color: var(--herb); font-weight: 600; }
+  /* ---------- The numbers ---------- */
+  .num-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: 16px; }
+  .num-card {
+    background: var(--cream); color: var(--ink); border-radius: 4px; padding: 16px 18px 18px;
+    font-family: 'IBM Plex Mono', monospace;
+    box-shadow: 0 6px 16px rgba(0,0,0,0.35);
+  }
+  .num-card .label { font-size: 9px; text-transform: uppercase; letter-spacing: 0.1em; color: var(--ink-soft); }
+  .num-card .value { font-size: 26px; font-weight: 600; margin-top: 8px; }
+  .num-card .value.good { color: var(--herb-deep); }
+  .num-card .value.bad { color: var(--red86); }
+  .num-card .sub { font-size: 10px; color: var(--ink-soft); margin-top: 6px; border-top: 1px dashed #CFC5AE; padding-top: 8px; }
 
-  #gate {
-    max-width: 360px; margin: 100px auto; text-align: center;
+  .hours-list { display: flex; flex-direction: column; gap: 10px; margin-top: 26px; }
+  .hours-row { display: flex; align-items: center; gap: 12px; font-family: 'IBM Plex Mono', monospace; }
+  .hours-name { width: 92px; font-size: 12px; flex-shrink: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .hours-track { flex: 1; height: 7px; border-radius: 4px; background: var(--panel); overflow: hidden; }
+  .hours-fill { height: 100%; background: var(--lamp-deep); border-radius: 4px; }
+  .hours-val { width: 58px; text-align: right; font-size: 12px; color: var(--lamp); flex-shrink: 0; }
+
+  /* ---------- Cost settings ---------- */
+  .pen-panel { border: 1px solid var(--seam); border-radius: 8px; background: var(--panel); padding: 20px; }
+  .pen-presets { display: flex; gap: 10px; margin-bottom: 16px; flex-wrap: wrap; }
+  .preset-btn {
+    padding: 9px 16px; border-radius: 6px; cursor: pointer; font-family: 'IBM Plex Mono', monospace;
+    font-size: 12px; font-weight: 600; background: var(--steel); color: var(--text); border: 1px solid var(--seam);
   }
-  #gate input {
-    width: 100%; padding: 10px 12px; margin-top: 16px; border-radius: 6px; border: 1px solid var(--line);
-    background: var(--panel); color: var(--text); font-family: 'IBM Plex Mono', monospace; font-size: 14px;
+  .preset-btn.active { border-color: var(--lamp); color: var(--lamp); }
+  .pen-fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 12px; }
+  .field label { display: block; font-family: 'IBM Plex Mono', monospace; font-size: 10px; text-transform: uppercase; color: var(--dim); margin-bottom: 6px; }
+  .field input, .field select { width: 100%; }
+  .pen-save { margin-top: 16px; display: flex; align-items: center; gap: 14px; }
+  .pen-save button {
+    padding: 9px 18px; border: none; border-radius: 6px; cursor: pointer;
+    background: var(--herb-deep); color: var(--cream); font-family: 'IBM Plex Mono', monospace; font-size: 12px; font-weight: 600;
   }
-  #gate button {
-    margin-top: 12px; width: 100%; padding: 10px 0; border-radius: 6px; border: none;
-    background: var(--ember); color: var(--ticket); font-family: 'IBM Plex Mono', monospace; font-weight: 600; cursor: pointer;
+  .pen-note { color: var(--dim); font-size: 11px; line-height: 1.6; margin-top: 14px; font-family: 'IBM Plex Mono', monospace; }
+  .pen-note strong { color: var(--text); }
+
+  /* ---------- Crew + closed dockets ---------- */
+  .add-btn {
+    padding: 8px 16px; border-radius: 6px; cursor: pointer; font-family: 'IBM Plex Mono', monospace;
+    font-size: 12px; font-weight: 600; background: var(--panel); color: var(--text); border: 1px solid var(--seam);
   }
-  #gate .err { color: var(--ember); font-size: 12px; margin-top: 10px; min-height: 16px; }
+  .add-btn:hover { border-color: var(--lamp); color: var(--lamp); }
+  .table-wrap { border: 1px solid var(--seam); border-radius: 8px; overflow-x: auto; background: var(--panel); }
+  table.data { width: 100%; border-collapse: collapse; font-family: 'IBM Plex Mono', monospace; font-size: 13px; }
+  table.data th {
+    text-align: left; padding: 11px 16px; font-size: 10px; text-transform: uppercase;
+    letter-spacing: 0.06em; color: var(--dim); font-weight: 500; border-bottom: 1px dashed var(--seam);
+  }
+  table.data td { padding: 10px 16px; border-bottom: 1px dashed #2A2C31; }
+  table.data tr:last-child td { border-bottom: none; }
+  td.dur { color: var(--herb); font-weight: 600; }
+
+  /* ---------- Modal ---------- */
+  .overlay {
+    display: none; position: fixed; inset: 0; background: rgba(10,10,12,0.7);
+    align-items: center; justify-content: center; z-index: 60;
+  }
+  .overlay.open { display: flex; }
+  .modal {
+    width: 330px; max-width: 92vw; background: var(--panel); border: 1px solid var(--seam);
+    border-radius: 10px; padding: 24px;
+  }
+  .modal h3 { margin: 0 0 18px; font-family: 'Bebas Neue', sans-serif; font-size: 26px; color: var(--cream); font-weight: 400; }
+  .modal .field { margin-bottom: 12px; }
+  .modal-actions { display: flex; gap: 10px; margin-top: 18px; }
+  .modal-actions button {
+    flex: 1; padding: 10px 0; border-radius: 6px; cursor: pointer;
+    font-family: 'IBM Plex Mono', monospace; font-size: 13px; font-weight: 600;
+  }
+  .modal-actions .save { background: var(--lamp); color: #201400; border: none; }
+  .modal-actions .cancel { background: transparent; color: var(--dim); border: 1px solid var(--seam); }
+  .modal .err { color: var(--red86); font-size: 12px; min-height: 14px; margin-top: 8px; }
+
+  /* ---------- The Larder ---------- */
+  .larder-add { display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-end; margin-bottom: 16px; }
+  .larder-add .field { margin: 0; }
+  .larder-add input { width: 130px; }
+  .larder-add .grow input { width: 180px; }
+  .larder-add button {
+    padding: 9px 18px; border: none; border-radius: 6px; cursor: pointer;
+    background: var(--herb-deep); color: var(--cream);
+    font-family: 'IBM Plex Mono', monospace; font-size: 12px; font-weight: 600;
+  }
+  .stock-row { display: flex; gap: 10px; flex-wrap: wrap; align-items: flex-end; margin-top: 16px; }
+  .stock-row .field { margin: 0; }
+  .stock-row input { width: 130px; }
+  .stock-note { color: var(--dim); font-size: 11px; font-family: 'IBM Plex Mono', monospace; margin-top: 10px; line-height: 1.5; }
+  td.amt { text-align: right; font-weight: 600; }
+  .del-btn {
+    background: transparent; border: none; color: var(--dim); cursor: pointer; font-size: 14px; padding: 2px 6px;
+  }
+  .del-btn:hover { color: var(--red86); }
+  tr.total-row td { border-top: 1px solid var(--seam); color: var(--lamp); font-weight: 600; }
+
+  /* ---------- Section chips + compact + search ---------- */
+  .section-chips { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 18px; }
+  .s-chip {
+    padding: 7px 14px; border-radius: 999px; cursor: pointer;
+    font-family: 'IBM Plex Mono', monospace; font-size: 12px; font-weight: 600;
+    background: var(--panel); color: var(--dim); border: 1px solid var(--seam);
+  }
+  .s-chip.active { border-color: var(--lamp); color: var(--lamp); }
+  .compact-list { display: flex; flex-direction: column; gap: 6px; }
+  .compact-row {
+    display: flex; align-items: center; gap: 12px; padding: 9px 14px;
+    background: var(--cream); color: var(--ink); border-radius: 4px;
+    font-family: 'IBM Plex Mono', monospace; font-size: 13px;
+    box-shadow: 0 2px 6px rgba(0,0,0,0.3);
+  }
+  .compact-row .c-name { font-weight: 600; min-width: 120px; }
+  .compact-row .c-dept { color: var(--ink-soft); font-size: 11px; text-transform: uppercase; flex: 1; }
+  .compact-row .c-time { color: var(--herb-deep); font-weight: 600; }
+  .crew-search { margin-bottom: 12px; }
+  .crew-search input { width: 260px; max-width: 100%; }
+  .scale-note { font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: var(--dim); margin-top: 8px; }
+
+  /* ---------- Motion ---------- */
+  @media (prefers-reduced-motion: no-preference) {
+    .ticket { transition: transform 0.16s ease; }
+    .ticket:hover { transform: translateY(-3px); }
+    .lit .ticket { animation: settle 0.5s ease backwards; }
+    .lit .ticket:nth-child(2) { animation-delay: 0.07s; }
+    .lit .ticket:nth-child(3) { animation-delay: 0.14s; }
+    .lit .ticket:nth-child(4) { animation-delay: 0.21s; }
+    @keyframes settle {
+      from { transform: translateY(-10px); opacity: 0; }
+      to { transform: translateY(0); opacity: 1; }
+    }
+    .cell:active { transform: scale(0.94); }
+    #dashboard { animation: fadein 0.5s ease; }
+    @keyframes fadein { from { opacity: 0; } to { opacity: 1; } }
+  }
 </style>
 </head>
 <body>
 
 <div id="gate">
-  <h1 class="display" style="font-size: 22px;">🍳 Kitchen Pass</h1>
-  <p class="mono" style="color: var(--text-dim); font-size: 13px;">Enter your manager key to view the dashboard.</p>
-  <input id="keyInput" type="password" placeholder="Manager key" />
-  <button onclick="submitKey()">Unlock</button>
-  <p class="err" id="gateErr"></p>
+  <div class="lamp-glow"></div>
+  <div class="card">
+    <div class="lamp-fixture" style="position: relative; margin: 0 auto 34px; transform: none; left: auto;"></div>
+    <h1 class="bebas">Kitchen Pass</h1>
+    <p class="mono">Manager key to open the pass.</p>
+    <input id="keyInput" type="password" placeholder="Manager key" autocomplete="current-password" />
+    <button onclick="submitKey()">Open the pass</button>
+    <p class="err mono" id="gateErr"></p>
+  </div>
 </div>
 
 <div class="wrap" id="dashboard" style="display:none;">
   <header>
-    <div class="brand">
-      <div class="brand-icon">🍳</div>
-      <div>
-        <h1 class="display">Kitchen Pass</h1>
-        <p class="subline mono" id="venueLine">Loading…</p>
-      </div>
-    </div>
+    <span class="brand bebas">Kitchen Pass</span>
+    <span class="venue mono" id="venueLine">—</span>
+    <span class="grow"></span>
+    <span id="serviceClock" class="bebas">--:--:--</span>
     <div class="badges">
-      <div class="badge mono"><span class="dot"></span><span id="onShiftCount">0 on shift</span></div>
-      <div class="badge warn mono" id="reviewBadge" style="display:none;">⚠ <span id="reviewCount">0 need review</span></div>
+      <span class="badge"><span class="dot"></span><span id="onShiftCount">0 on</span></span>
+      <span class="badge alert" id="reviewBadge" style="display:none;">⚠ <span id="reviewCount"></span></span>
     </div>
   </header>
 
-  <div class="cols">
-    <div>
-      <h2 class="section">On Shift Now</h2>
-      <div id="onShiftList"></div>
+  <section class="lamp-zone lit-target">
+    <div class="lamp-glow"></div>
+    <div class="lamp-fixture"></div>
+    <div class="section-chips" id="sectionChips" style="position: relative; z-index: 1;"></div>
+    <div class="pass-cols rail-zone" style="position: relative; z-index: 1;">
+      <div>
+        <div class="stamp"><h2>The Pass</h2><div class="rule"></div></div>
+        <div class="rail"></div>
+        <div id="onShiftList"></div>
+      </div>
+      <div>
+        <div class="stamp"><h2>Needs a Look</h2><div class="rule"></div></div>
+        <div class="rail"></div>
+        <div id="reviewList"></div>
+      </div>
     </div>
-    <div>
-      <h2 class="section warn-title">Needs Review</h2>
-      <div id="reviewList"></div>
-    </div>
-  </div>
+  </section>
 
-  <div>
-    <h2 class="section">Recent Shifts</h2>
+  <section>
+    <div class="stamp"><h2>Service Board</h2><div class="rule"></div></div>
+    <div class="board-controls">
+      <button class="week-nav" onclick="changeWeek(-1)" aria-label="Previous week">‹</button>
+      <span class="week-label" id="weekLabel"></span>
+      <button class="week-nav" onclick="changeWeek(1)" aria-label="Next week">›</button>
+      <button class="publish-btn" id="publishBtn" onclick="publishRoster()">Send roster to WhatsApp</button>
+    </div>
+    <div class="board-wrap">
+      <table class="board">
+        <thead id="rosterHead"></thead>
+        <tbody id="rosterBody"></tbody>
+      </table>
+    </div>
+    <div class="legend">
+      <span><span class="chip" style="background:#7A5716;"></span>AM</span>
+      <span><span class="chip" style="background:#3F3663;"></span>PM</span>
+      <span><span class="chip" style="background:var(--herb-deep);"></span>All day</span>
+      <span><span class="chip" style="background:#1E2A1D;"></span>Available</span>
+      <span><span class="chip" style="background:#2E1B1A;"></span>Unavailable</span>
+      <span><span class="chip" style="box-shadow: inset 0 0 0 2px var(--lamp); background:transparent;"></span>Outside availability</span>
+    </div>
+    <p class="scale-note" id="boardScaleNote"></p>
+    <div class="cost-line">
+      <span><span id="rosterCost">$0</span> <span style="color:var(--dim);">rostered this week</span></span>
+      <span><label>Revenue forecast</label><input id="revenueInput" type="number" min="0" placeholder="e.g. 18000" onchange="revenueChanged()" /></span>
+      <span id="labourPct"></span>
+      <span id="foodPct"></span>
+      <span id="primePct"></span>
+      <span class="cost-note">Costing uses your Cost Settings below (weekend and holiday multipliers, weekly overtime) on flat hourly rates. Planning estimates, not payroll. Slot hours: AM 5h · PM 6h · All day 10h.</span>
+    </div>
+    <p class="inline-msg" id="missingRates"></p>
+    <p class="inline-msg" id="publishResult"></p>
+  </section>
+
+  <section>
+    <div class="stamp"><h2>The Numbers — Last 7 Days</h2><div class="rule"></div></div>
+    <div class="num-grid" id="vaGrid"></div>
+    <div class="hours-list" id="hoursList"></div>
+  </section>
+
+  <section>
+    <div class="stamp"><h2>The Larder — Food Cost</h2><div class="rule"></div></div>
+    <div class="pen-panel">
+      <div class="larder-add">
+        <div class="field"><label>Date</label><input id="purchDate" type="date" /></div>
+        <div class="field"><label>Amount ($)</label><input id="purchAmount" type="number" min="0" step="0.01" placeholder="e.g. 420" /></div>
+        <div class="field grow"><label>Supplier</label><input id="purchSupplier" type="text" placeholder="e.g. Bidfood" /></div>
+        <button onclick="addPurchase()">Log purchase</button>
+        <span class="inline-msg" id="purchStatus" style="margin: 0;"></span>
+      </div>
+      <div class="table-wrap">
+        <table class="data">
+          <thead><tr><th>Date</th><th>Supplier</th><th>Source</th><th style="text-align:right;">Amount</th><th></th></tr></thead>
+          <tbody id="purchBody"></tbody>
+        </table>
+      </div>
+      <div class="stock-row">
+        <div class="field"><label>Opening stock ($, optional)</label><input id="openingStock" type="number" min="0" step="1" onchange="stockChanged()" /></div>
+        <div class="field"><label>Closing stock ($, optional)</label><input id="closingStock" type="number" min="0" step="1" onchange="stockChanged()" /></div>
+      </div>
+      <p class="stock-note">
+        Food cost uses purchases ÷ revenue by default. Enter opening and closing stock values to switch this week to the
+        true COGS formula: (opening + purchases − closing) ÷ revenue. Crew can log deliveries from WhatsApp with
+        "spend 420 bidfood" — entries appear here instantly.
+      </p>
+    </div>
+  </section>
+
+  <section>
+    <div class="stamp"><h2>Cost Settings — Penalty Rates</h2><div class="rule"></div></div>
+    <div class="pen-panel">
+      <div class="pen-presets">
+        <button class="preset-btn" id="presetAU" onclick="applyPreset('AU')">🇦🇺 Australia preset</button>
+        <button class="preset-btn" id="presetUS" onclick="applyPreset('US')">🇺🇸 US preset</button>
+      </div>
+      <div class="pen-fields">
+        <div class="field"><label>Saturday ×</label><input id="penSat" type="number" step="0.05" min="0.5" max="5" /></div>
+        <div class="field"><label>Sunday ×</label><input id="penSun" type="number" step="0.05" min="0.5" max="5" /></div>
+        <div class="field"><label>Public holiday ×</label><input id="penPH" type="number" step="0.05" min="0.5" max="5" /></div>
+        <div class="field"><label>Overtime after (h/week)</label><input id="penOTh" type="number" step="1" min="1" max="168" /></div>
+        <div class="field"><label>Overtime ×</label><input id="penOTx" type="number" step="0.05" min="1" max="5" /></div>
+      </div>
+      <div class="field" style="margin-top: 14px;">
+        <label>Public holiday dates (YYYY-MM-DD, comma separated)</label>
+        <input id="penPHDates" type="text" placeholder="e.g. 2026-12-25, 2026-12-26, 2027-01-01" />
+      </div>
+      <div class="pen-save">
+        <button onclick="savePenalties()">Save cost settings</button>
+        <span class="inline-msg" id="penStatus" style="margin: 0;"></span>
+      </div>
+      <p class="pen-note">
+        <strong>Cost-planning estimates only</strong> — not payroll, not award interpretation, not legal advice.
+        Presets are editable starting points: AU figures reflect common hospitality patterns (verify your modern award,
+        classification and casual loading at fairwork.gov.au); the US preset is the federal FLSA baseline (some states,
+        e.g. California, add daily overtime — verify your state law). You confirm and own these numbers.
+      </p>
+    </div>
+  </section>
+
+  <section>
+    <div class="stamp"><h2>Crew</h2><div class="spacer"></div><button class="add-btn" onclick="openAddStaff()">+ Add crew</button></div>
+    <div class="crew-search"><input id="crewSearch" type="search" placeholder="Search crew by name or phone…" oninput="crewSearchChanged()" /></div>
     <div class="table-wrap">
-      <table>
-        <thead>
-          <tr><th>Staff</th><th>Date</th><th>In</th><th>Out</th><th>Duration</th></tr>
-        </thead>
+      <table class="data">
+        <thead><tr><th>Name</th><th>Role</th><th>Section</th><th>Phone</th><th>Rate</th></tr></thead>
+        <tbody id="staffBody"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
+    <div class="stamp"><h2>Closed Dockets</h2><div class="rule"></div></div>
+    <div class="table-wrap">
+      <table class="data">
+        <thead><tr><th>Crew</th><th>Date</th><th>In</th><th>Out</th><th>Shift</th></tr></thead>
         <tbody id="historyBody"></tbody>
       </table>
+    </div>
+  </section>
+</div>
+
+<div class="overlay" id="addStaffOverlay">
+  <div class="modal">
+    <h3>Add Crew</h3>
+    <div class="field"><label>Name</label><input id="newName" type="text" placeholder="e.g. Kenji" /></div>
+    <div class="field"><label>Phone (international, no +)</label><input id="newPhone" type="text" placeholder="e.g. 61412345678" /></div>
+    <div class="field"><label>Role</label>
+      <select id="newRole">
+        <option value="staff">staff</option>
+        <option value="manager">manager</option>
+        <option value="owner">owner</option>
+      </select>
+    </div>
+    <div class="field"><label>Section</label><input id="newDept" type="text" placeholder="e.g. kitchen" /></div>
+    <div class="field"><label>Hourly wage rate ($)</label><input id="newWage" type="number" min="0" step="0.01" placeholder="e.g. 32.50" /></div>
+    <p class="err mono" id="addStaffErr"></p>
+    <div class="modal-actions">
+      <button class="cancel" onclick="closeAddStaff()">Cancel</button>
+      <button class="save" onclick="saveStaff()">Save crew member</button>
     </div>
   </div>
 </div>
@@ -185,6 +553,7 @@
     loadDashboard();
   }
 
+  /* ---------- Format helpers ---------- */
   function fmtClock(iso) {
     return new Date(iso).toLocaleTimeString("en-AU", { hour: "2-digit", minute: "2-digit" });
   }
@@ -203,116 +572,249 @@
     const s = staffList.find((x) => x.phone === phone);
     return s ? (s.department || "—") : "—";
   }
-  function rotationFor(id) {
-    let seed = 0;
-    for (const c of id) seed += c.charCodeAt(0);
-    return ((seed % 7) - 3) * 0.6;
+  function esc(str) {
+    return String(str).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
   }
 
+  /* ---------- Service clock ---------- */
+  setInterval(() => {
+    const el = document.getElementById("serviceClock");
+    if (el) el.textContent = new Date().toLocaleTimeString("en-AU", { hour12: false });
+  }, 1000);
+
+  /* ---------- Section filter (scale: one-click chips, auto-hidden when trivial) ---------- */
+  let activeSection = "ALL";
+  let crewQuery = "";
+
+  function sectionsOf(staff) {
+    const set = new Set(staff.map((s) => (s.department || "").trim().toLowerCase()).filter(Boolean));
+    return [...set].sort();
+  }
+  function inSection(person) {
+    if (activeSection === "ALL") return true;
+    if (activeSection === "__none") return !(person.department || "").trim();
+    return (person.department || "").trim().toLowerCase() === activeSection;
+  }
+  function renderSectionChips(staff) {
+    const el = document.getElementById("sectionChips");
+    const sections = sectionsOf(staff);
+    const hasNone = staff.some((s) => !(s.department || "").trim());
+    // Small venue, one section (or none): chips add nothing — hide entirely.
+    if (sections.length + (hasNone ? 1 : 0) <= 1) {
+      el.innerHTML = "";
+      activeSection = "ALL";
+      return;
+    }
+    const chips = [{ key: "ALL", label: "All sections" }]
+      .concat(sections.map((s) => ({ key: s, label: s })))
+      .concat(hasNone ? [{ key: "__none", label: "no section" }] : []);
+    el.innerHTML = chips.map((c) =>
+      `<button class="s-chip${activeSection === c.key ? " active" : ""}" onclick="setSection('${esc(c.key)}')">${esc(c.label)}</button>`
+    ).join("");
+  }
+  function setSection(key) {
+    activeSection = key;
+    if (window._core) render({ ...window._core, venue: window._venue });
+    if (rosterData) renderRoster();
+  }
+  function crewSearchChanged() {
+    crewQuery = document.getElementById("crewSearch").value.trim().toLowerCase();
+    if (window._core) render({ ...window._core, venue: window._venue });
+  }
+
+  /* ---------- Load + render core ---------- */
   async function loadDashboard() {
     document.getElementById("gateErr").textContent = "";
     let data;
     try {
       const res = await fetch(`/api/dashboard?key=${encodeURIComponent(managerKey)}`);
       if (res.status === 401) {
-        document.getElementById("gateErr").textContent = "Wrong key — try again.";
+        document.getElementById("gateErr").textContent = "That key doesn't open the pass — check it and try again.";
         return;
       }
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       data = await res.json();
     } catch (err) {
-      document.getElementById("gateErr").textContent = "Couldn't reach the server — try refreshing.";
+      document.getElementById("gateErr").textContent = "Can't reach the server — check the connection and try again.";
       return;
     }
 
     document.getElementById("gate").style.display = "none";
-    document.getElementById("dashboard").style.display = "block";
+    const dash = document.getElementById("dashboard");
+    dash.style.display = "block";
     render(data);
+    loadRoster();
+    loadPenalties();
+    requestAnimationFrame(() => document.querySelector(".lit-target").classList.add("lit"));
   }
 
   function render(data) {
     const { staff, shifts, venue } = data;
-    document.getElementById("venueLine").textContent = `${venue?.name || "Venue"} · ${new Date().toLocaleString("en-AU", { weekday: "long", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}`;
+    window._core = { staff, shifts };
+    window._venue = venue;
+    renderSectionChips(staff);
+    document.getElementById("venueLine").textContent =
+      `${venue?.name || "Venue"} · ${new Date().toLocaleDateString("en-AU", { weekday: "long", day: "numeric", month: "short" })}`;
 
-    const onShift = shifts.filter((s) => !s.clockOut && !s.clockIn.flaggedForReview);
-    const flagged = shifts.filter((s) => !s.clockOut && s.clockIn.flaggedForReview);
+    const bySection = (s) => {
+      const person = staff.find((x) => x.phone === s.staffPhone);
+      return person ? inSection(person) : true;
+    };
+    const onShift = shifts.filter((s) => !s.clockOut && !s.clockIn.flaggedForReview && bySection(s));
+    const flagged = shifts.filter((s) => !s.clockOut && s.clockIn.flaggedForReview && bySection(s));
     const history = shifts
       .filter((s) => s.clockOut && !s.clockOut.denied)
       .sort((a, b) => new Date(b.clockIn.time) - new Date(a.clockIn.time))
       .slice(0, 25);
 
-    document.getElementById("onShiftCount").textContent = `${onShift.length} on shift`;
+    document.getElementById("onShiftCount").textContent = `${onShift.length} on`;
     const reviewBadge = document.getElementById("reviewBadge");
     if (flagged.length > 0) {
-      reviewBadge.style.display = "flex";
-      document.getElementById("reviewCount").textContent = `${flagged.length} need${flagged.length === 1 ? "s" : ""} review`;
+      reviewBadge.style.display = "inline-block";
+      document.getElementById("reviewCount").textContent = `${flagged.length} needs a look`;
     } else {
       reviewBadge.style.display = "none";
     }
 
-    // On shift now
+    // The Pass
     const onShiftList = document.getElementById("onShiftList");
     if (onShift.length === 0) {
-      onShiftList.innerHTML = `<div class="empty">Nobody's clocked in. Tickets appear here the moment someone texts "in".</div>`;
+      onShiftList.innerHTML = `<div class="empty">Nobody's on. Tickets land here the moment someone texts "in".</div>`;
+    } else if (onShift.length > 12) {
+      // Auto-compact at scale — no toggle, the board just adapts.
+      onShiftList.innerHTML = `<div class="compact-list">${onShift.map((s) => {
+        const elapsed = Date.now() - new Date(s.clockIn.time).getTime();
+        return `
+          <div class="compact-row">
+            <span class="c-name">${esc(staffName(staff, s.staffPhone))}</span>
+            <span class="c-dept">${esc(staffDept(staff, s.staffPhone))}</span>
+            <span class="c-time">⏱ ${fmtDuration(elapsed)}</span>
+          </div>`;
+      }).join("")}</div>`;
     } else {
       onShiftList.innerHTML = `<div class="tickets">${onShift.map((s) => {
         const elapsed = Date.now() - new Date(s.clockIn.time).getTime();
-        const name = staffName(staff, s.staffPhone);
         return `
-          <div class="ticket" style="transform: rotate(${rotationFor(s.shiftId)}deg);">
-            <span class="pin"></span>
-            <p class="t-name display">${name}</p>
-            <p class="t-dept mono">${staffDept(staff, s.staffPhone)}</p>
-            <div class="t-time mono">⏱ ${fmtDuration(elapsed)}</div>
-            <p class="t-sub mono">in at ${fmtClock(s.clockIn.time)}</p>
+          <div class="ticket">
+            <span class="clip"></span>
+            <div class="name">${esc(staffName(staff, s.staffPhone))}</div>
+            <div class="dept">${esc(staffDept(staff, s.staffPhone))}</div>
+            <div class="elapsed">⏱ ${fmtDuration(elapsed)}</div>
+            <div class="since">on since ${fmtClock(s.clockIn.time)}</div>
           </div>`;
       }).join("")}</div>`;
     }
 
-    // Needs review
+    // Needs a look
     const reviewList = document.getElementById("reviewList");
     if (flagged.length === 0) {
-      reviewList.innerHTML = `<div class="empty">Nothing flagged. Out-of-range clock-ins land here for approval.</div>`;
+      reviewList.innerHTML = `<div class="empty">All clear. Out-of-range clock-ins land here for a decision.</div>`;
     } else {
-      reviewList.innerHTML = flagged.map((s) => {
-        const name = staffName(staff, s.staffPhone);
-        return `
-          <div class="flag-card" style="transform: rotate(${(-1 * rotationFor(s.shiftId))}deg);">
-            <span class="pin flag"></span>
-            <div class="flag-top">
-              <div>
-                <p class="t-name display">${name}</p>
-                <p class="t-dept mono">${staffDept(staff, s.staffPhone)}</p>
-              </div>
-              <span class="flag-badge mono">FLAGGED</span>
-            </div>
-            <div class="flag-dist mono">📍 ${s.clockIn.distanceMeters}m from venue</div>
-            <p class="t-sub mono">attempted at ${fmtClock(s.clockIn.time)}</p>
-            <div class="flag-actions">
-              <button class="btn approve" onclick="review('${s.shiftId}', true, this)">✓ Approve</button>
-              <button class="btn deny" onclick="review('${s.shiftId}', false, this)">✕ Deny</button>
-            </div>
-          </div>`;
-      }).join("");
+      reviewList.innerHTML = `<div class="tickets">${flagged.map((s) => `
+        <div class="ticket">
+          <span class="clip"></span>
+          <span class="tag">FLAGGED</span>
+          <div class="name">${esc(staffName(staff, s.staffPhone))}</div>
+          <div class="dept">${esc(staffDept(staff, s.staffPhone))}</div>
+          <div class="divider"></div>
+          <div class="dist">📍 ${esc(s.clockIn.distanceMeters)}m from the venue</div>
+          <div class="since">tried at ${fmtClock(s.clockIn.time)}</div>
+          <div class="actions">
+            <button class="approve" onclick="review('${esc(s.shiftId)}', true, this)">Approve</button>
+            <button class="cut" onclick="review('${esc(s.shiftId)}', false, this)">Cut</button>
+          </div>
+        </div>`).join("")}</div>`;
     }
 
-    // History table
-    const historyBody = document.getElementById("historyBody");
-    historyBody.innerHTML = history.map((s) => {
-      const name = staffName(staff, s.staffPhone);
-      const durationMs = new Date(s.clockOut.time) - new Date(s.clockIn.time);
-      return `<tr>
-        <td>${name}</td>
+    // Crew table
+    const crewFiltered = staff.filter((s) =>
+      inSection(s) &&
+      (!crewQuery || s.name.toLowerCase().includes(crewQuery) || String(s.phone).includes(crewQuery))
+    );
+    document.getElementById("staffBody").innerHTML = crewFiltered.map((s) => `
+      <tr>
+        <td>${esc(s.name)}</td>
+        <td>${esc(s.role)}</td>
+        <td>${esc(s.department || "—")}</td>
+        <td>${esc(s.phone)}</td>
+        <td>${s.wageRate != null ? "$" + Number(s.wageRate).toFixed(2) : "—"}</td>
+      </tr>`).join("") ||
+      `<tr><td colspan="5" style="color: var(--dim);">${staff.length ? "No crew match that filter." : "No crew yet — add your first crew member above."}</td></tr>`;
+
+    // Actuals for The Numbers
+    let actualCost = 0, actualMs = 0;
+    const noRateActual = new Set();
+    const actualHoursByPerson = {};
+    shifts.forEach((s) => {
+      if (!s.clockOut || s.clockOut.denied) return;
+      if (new Date(s.clockIn.time).getTime() < Date.now() - 7 * 24 * 60 * 60 * 1000) return;
+      const ms = shiftMinusBreaks(s);
+      actualMs += ms;
+      const person = staff.find((x) => x.phone === s.staffPhone);
+      if (person && person.wageRate != null) {
+        const hours = ms / 3600000;
+        actualCost += hours * Number(person.wageRate) * dayMultiplier(s.clockIn.time.slice(0, 10));
+        actualHoursByPerson[s.staffPhone] = (actualHoursByPerson[s.staffPhone] || 0) + hours;
+      } else if (person) {
+        noRateActual.add(person.name);
+      }
+    });
+    if (penaltyRules && penaltyRules.overtimeWeeklyHours) {
+      for (const [phone, hours] of Object.entries(actualHoursByPerson)) {
+        const over = hours - penaltyRules.overtimeWeeklyHours;
+        if (over <= 0) continue;
+        const person = staff.find((x) => x.phone === phone);
+        if (person && person.wageRate != null) {
+          actualCost += over * Number(person.wageRate) * ((penaltyRules.overtimeMultiplier || 1) - 1);
+        }
+      }
+    }
+    window._actuals = { actualCost, actualMs, noRateActual: [...noRateActual] };
+    renderVariance();
+
+    // Week hours bars
+    const weekAgo = Date.now() - 7 * 24 * 60 * 60 * 1000;
+    const hoursByPhone = {};
+    shifts.forEach((s) => {
+      if (!s.clockOut || s.clockOut.denied) return;
+      if (new Date(s.clockIn.time).getTime() < weekAgo) return;
+      hoursByPhone[s.staffPhone] = (hoursByPhone[s.staffPhone] || 0) + shiftMinusBreaks(s);
+    });
+    const allEntries = Object.entries(hoursByPhone).sort((a, b) => b[1] - a[1]);
+    const entries = allEntries.slice(0, 15);
+    const maxMs = Math.max(...entries.map((e) => e[1]), 1);
+    const capNote = allEntries.length > 15
+      ? `<p class="scale-note">Top 15 of ${allEntries.length} crew by hours.</p>` : "";
+    document.getElementById("hoursList").innerHTML = entries.length === 0 ? "" :
+      capNote + entries.map(([phone, ms]) => `
+        <div class="hours-row">
+          <div class="hours-name">${esc(staffName(staff, phone))}</div>
+          <div class="hours-track"><div class="hours-fill" style="width:${Math.round((ms / maxMs) * 100)}%;"></div></div>
+          <div class="hours-val">${fmtDuration(ms)}</div>
+        </div>`).join("");
+
+    // Closed dockets
+    document.getElementById("historyBody").innerHTML = history.map((s) => `
+      <tr>
+        <td>${esc(staffName(staff, s.staffPhone))}</td>
         <td>${fmtDay(s.clockIn.time)}</td>
         <td>${fmtClock(s.clockIn.time)}</td>
         <td>${fmtClock(s.clockOut.time)}</td>
-        <td class="dur">${fmtDuration(durationMs)}</td>
-      </tr>`;
-    }).join("");
+        <td class="dur">${fmtDuration(new Date(s.clockOut.time) - new Date(s.clockIn.time))}</td>
+      </tr>`).join("") || `<tr><td colspan="5" style="color: var(--dim);">No closed shifts yet — they print here after the first clock-out.</td></tr>`;
+  }
+
+  function shiftMinusBreaks(shift) {
+    const totalMs = new Date(shift.clockOut.time) - new Date(shift.clockIn.time);
+    const breakMs = (shift.breaks || []).reduce((sum, b) => {
+      if (!b.end) return sum;
+      return sum + (new Date(b.end) - new Date(b.start));
+    }, 0);
+    return Math.max(0, totalMs - breakMs);
   }
 
   async function review(shiftId, approve, btnEl) {
-    const card = btnEl.closest(".flag-card");
+    const card = btnEl.closest(".ticket");
     card.querySelectorAll("button").forEach((b) => (b.disabled = true));
     try {
       const res = await fetch(`/api/shifts/${encodeURIComponent(shiftId)}/review?key=${encodeURIComponent(managerKey)}`, {
@@ -324,12 +826,495 @@
       await loadDashboard();
     } catch (err) {
       card.querySelectorAll("button").forEach((b) => (b.disabled = false));
-      alert("Couldn't save that — please try again.");
+      alert("That didn't save — try again.");
     }
   }
 
+  /* ---------- Add crew ---------- */
+  function openAddStaff() {
+    document.getElementById("addStaffErr").textContent = "";
+    ["newName", "newPhone", "newDept", "newWage"].forEach((id) => (document.getElementById(id).value = ""));
+    document.getElementById("newRole").value = "staff";
+    document.getElementById("addStaffOverlay").classList.add("open");
+  }
+  function closeAddStaff() {
+    document.getElementById("addStaffOverlay").classList.remove("open");
+  }
+  async function saveStaff() {
+    const name = document.getElementById("newName").value.trim();
+    const phone = document.getElementById("newPhone").value.trim().replace(/[^0-9]/g, "");
+    const role = document.getElementById("newRole").value;
+    const department = document.getElementById("newDept").value.trim();
+    const wageRaw = document.getElementById("newWage").value.trim();
+    const wageRate = wageRaw === "" ? null : Number(wageRaw);
+    const errEl = document.getElementById("addStaffErr");
+    if (!name || !phone) {
+      errEl.textContent = "Name and phone are both needed.";
+      return;
+    }
+    try {
+      const res = await fetch(`/api/staff?key=${encodeURIComponent(managerKey)}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, phone, role, department, wageRate }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        errEl.textContent = json.error || "That didn't save — try again.";
+        return;
+      }
+      closeAddStaff();
+      await loadDashboard();
+    } catch (err) {
+      errEl.textContent = "Can't reach the server — try again.";
+    }
+  }
+
+  /* ---------- Roster ---------- */
+  const SLOT_CYCLE = ["", "AM", "PM", "ALL"];
+  const SLOT_HOURS = { AM: 5, PM: 6, ALL: 10 };
+  const DAY_KEY_BY_INDEX = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
+  let rosterWeekStart = mondayOf(new Date());
+  let rosterData = null;
+  let rosterSaveTimer = null;
+
+  function mondayOf(date) {
+    const d = new Date(date);
+    const day = d.getDay();
+    const diff = day === 0 ? -6 : 1 - day;
+    d.setDate(d.getDate() + diff);
+    d.setHours(12, 0, 0, 0);
+    return d.toISOString().slice(0, 10);
+  }
+  function weekDates(weekStart) {
+    const out = [];
+    const base = new Date(weekStart + "T12:00:00");
+    for (let i = 0; i < 7; i++) {
+      const d = new Date(base);
+      d.setDate(base.getDate() + i);
+      out.push(d.toISOString().slice(0, 10));
+    }
+    return out;
+  }
+  function changeWeek(delta) {
+    const base = new Date(rosterWeekStart + "T12:00:00");
+    base.setDate(base.getDate() + delta * 7);
+    rosterWeekStart = mondayOf(base);
+    loadRoster();
+  }
+  async function loadRoster() {
+    try {
+      const res = await fetch(`/api/roster?week=${rosterWeekStart}&key=${encodeURIComponent(managerKey)}`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      rosterData = await res.json();
+      renderRoster();
+      loadPurchases();
+    } catch (err) {
+      document.getElementById("rosterBody").innerHTML =
+        `<tr><td colspan="8" style="text-align:left; padding: 14px; color: var(--dim);">Board didn't load — refresh to try again.</td></tr>`;
+    }
+  }
+  function isAvailable(person, dateIso, dayIndex) {
+    const availability = person.availability;
+    if (!availability) return null;
+    const exception = (availability.exceptions || []).find((e) => e.date === dateIso);
+    if (exception) return exception.available !== false ? true : false;
+    const days = availability.days || [];
+    if (days.length === 0) return null;
+    return days.includes(DAY_KEY_BY_INDEX[dayIndex]);
+  }
+  function renderRoster() {
+    const { roster, staff } = rosterData;
+    const dates = weekDates(rosterWeekStart);
+    const startLabel = new Date(dates[0] + "T12:00:00").toLocaleDateString("en-AU", { day: "numeric", month: "short" });
+    const endLabel = new Date(dates[6] + "T12:00:00").toLocaleDateString("en-AU", { day: "numeric", month: "short" });
+    document.getElementById("weekLabel").textContent = `${startLabel} – ${endLabel}${roster.published ? " ✓" : ""}`;
+
+    document.getElementById("rosterHead").innerHTML = `<tr><th>Crew</th>${dates.map((d) =>
+      `<th>${new Date(d + "T12:00:00").toLocaleDateString("en-AU", { weekday: "short", day: "numeric" })}</th>`).join("")}</tr>`;
+
+    if (!staff.length) {
+      document.getElementById("rosterBody").innerHTML =
+        `<tr><td colspan="8" style="text-align:left; padding: 14px; color: var(--dim);">Add crew first — the board fills in from your crew list.</td></tr>`;
+      document.getElementById("boardScaleNote").textContent = "";
+      return;
+    }
+
+    const boardStaff = staff.filter(inSection);
+    document.getElementById("boardScaleNote").textContent =
+      boardStaff.length < staff.length ? `Showing ${boardStaff.length} of ${staff.length} crew — costing below is always whole-venue.` : "";
+
+    if (!boardStaff.length) {
+      document.getElementById("rosterBody").innerHTML =
+        `<tr><td colspan="8" style="text-align:left; padding: 14px; color: var(--dim);">No crew in this section — pick another chip above.</td></tr>`;
+      updateCosting();
+      return;
+    }
+
+    document.getElementById("rosterBody").innerHTML = boardStaff.map((person) => {
+      const cells = dates.map((dateIso, dayIndex) => {
+        const slot = roster.assignments?.[dateIso]?.[person.phone] || "";
+        const avail = isAvailable(person, dateIso, dayIndex);
+        let cls = "cell";
+        if (slot) cls += ` slot-${slot}`;
+        else if (avail === true) cls += " avail";
+        else if (avail === false) cls += " unavail";
+        if (slot && avail === false) cls += " conflict";
+        const title = slot && avail === false ? "Assigned outside declared availability" : "";
+        return `<td><button class="${cls}" title="${title}" onclick="cycleCell('${dateIso}','${esc(person.phone)}')">${slot}</button></td>`;
+      }).join("");
+      return `<tr><td class="crew-cell">${esc(person.name)}</td>${cells}</tr>`;
+    }).join("");
+
+    const revInput = document.getElementById("revenueInput");
+    if (document.activeElement !== revInput) {
+      revInput.value = roster.revenueForecast != null ? roster.revenueForecast : "";
+    }
+    const openInput = document.getElementById("openingStock");
+    if (document.activeElement !== openInput) {
+      openInput.value = roster.openingStock != null ? roster.openingStock : "";
+    }
+    const closeInput = document.getElementById("closingStock");
+    if (document.activeElement !== closeInput) {
+      closeInput.value = roster.closingStock != null ? roster.closingStock : "";
+    }
+    updateCosting();
+  }
+  function cycleCell(dateIso, phone) {
+    const assignments = rosterData.roster.assignments = rosterData.roster.assignments || {};
+    const day = assignments[dateIso] = assignments[dateIso] || {};
+    const current = day[phone] || "";
+    const next = SLOT_CYCLE[(SLOT_CYCLE.indexOf(current) + 1) % SLOT_CYCLE.length];
+    if (next) day[phone] = next;
+    else delete day[phone];
+    renderRoster();
+    scheduleRosterSave();
+  }
+  function scheduleRosterSave() {
+    clearTimeout(rosterSaveTimer);
+    rosterSaveTimer = setTimeout(saveRoster, 500);
+  }
+  async function saveRoster() {
+    try {
+      await fetch(`/api/roster?key=${encodeURIComponent(managerKey)}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          week: rosterWeekStart,
+          assignments: rosterData.roster.assignments || {},
+          revenueForecast: document.getElementById("revenueInput").value === "" ? null : Number(document.getElementById("revenueInput").value),
+          openingStock: document.getElementById("openingStock").value === "" ? null : Number(document.getElementById("openingStock").value),
+          closingStock: document.getElementById("closingStock").value === "" ? null : Number(document.getElementById("closingStock").value),
+        }),
+      });
+    } catch (err) {
+      document.getElementById("publishResult").innerHTML =
+        `<span class="fail">Auto-save didn't go through — check the connection.</span>`;
+    }
+  }
+  async function publishRoster() {
+    const btn = document.getElementById("publishBtn");
+    const resultEl = document.getElementById("publishResult");
+    btn.disabled = true;
+    resultEl.textContent = "Sending…";
+    try {
+      await saveRoster();
+      const res = await fetch(`/api/roster/publish?key=${encodeURIComponent(managerKey)}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ week: rosterWeekStart }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "Send failed");
+      const ok = json.results.filter((r) => r.sent);
+      const failed = json.results.filter((r) => !r.sent);
+      let html = ok.length ? `<span class="ok">Sent to ${ok.map((r) => esc(r.name)).join(", ")}.</span>` : "";
+      if (failed.length) {
+        html += ` <span class="fail">Couldn't reach ${failed.map((r) => esc(r.name)).join(", ")} — they'll see it next time they message the bot (WhatsApp's 24h window).</span>`;
+      }
+      if (!json.results.length) html = `<span class="fail">Nobody's on the board this week yet.</span>`;
+      resultEl.innerHTML = html;
+      loadRoster();
+    } catch (err) {
+      resultEl.innerHTML = `<span class="fail">${esc(err.message || "Send failed — try again.")}</span>`;
+    } finally {
+      btn.disabled = false;
+    }
+  }
+
+  /* ---------- Costing ---------- */
+  const PRESETS = {
+    AU: { saturday: 1.25, sunday: 1.5, publicHoliday: 2.25, overtimeWeeklyHours: 38, overtimeMultiplier: 1.5 },
+    US: { saturday: 1.0, sunday: 1.0, publicHoliday: 1.0, overtimeWeeklyHours: 40, overtimeMultiplier: 1.5 },
+  };
+  let penaltyRules = null;
+
+  function dayMultiplier(dateIso) {
+    if (!penaltyRules) return 1;
+    if ((penaltyRules.publicHolidays || []).includes(dateIso)) return penaltyRules.publicHoliday || 1;
+    const dow = new Date(dateIso + "T12:00:00").getDay();
+    if (dow === 6) return penaltyRules.saturday || 1;
+    if (dow === 0) return penaltyRules.sunday || 1;
+    return 1;
+  }
+  function rosterWeekCost() {
+    const { roster, staff } = rosterData;
+    let total = 0;
+    const missing = new Set();
+    const hoursByPerson = {};
+    for (const [dateIso, dayAssignments] of Object.entries(roster.assignments || {})) {
+      for (const [phone, slot] of Object.entries(dayAssignments)) {
+        if (!slot) continue;
+        const person = staff.find((s) => s.phone === phone);
+        const rate = person && person.wageRate != null ? Number(person.wageRate) : null;
+        const hours = SLOT_HOURS[slot] || 0;
+        if (rate == null) {
+          if (person) missing.add(person.name);
+          continue;
+        }
+        total += hours * rate * dayMultiplier(dateIso);
+        hoursByPerson[phone] = (hoursByPerson[phone] || 0) + hours;
+      }
+    }
+    if (penaltyRules && penaltyRules.overtimeWeeklyHours) {
+      for (const [phone, hours] of Object.entries(hoursByPerson)) {
+        const over = hours - penaltyRules.overtimeWeeklyHours;
+        if (over <= 0) continue;
+        const person = staff.find((s) => s.phone === phone);
+        const rate = person && person.wageRate != null ? Number(person.wageRate) : null;
+        if (rate == null) continue;
+        total += over * rate * ((penaltyRules.overtimeMultiplier || 1) - 1);
+      }
+    }
+    return { total, missing: [...missing] };
+  }
+  function updateCosting() {
+    if (!rosterData) return;
+    const { total, missing } = rosterWeekCost();
+    document.getElementById("rosterCost").textContent = "$" + total.toFixed(0);
+    const rev = Number(document.getElementById("revenueInput").value);
+    const pctEl = document.getElementById("labourPct");
+    if (rev > 0 && total > 0) {
+      const pct = (total / rev) * 100;
+      pctEl.innerHTML = `<span class="${pct > 30 ? "pct-warn" : "pct-ok"}">${pct.toFixed(1)}% labour</span>`;
+    } else {
+      pctEl.textContent = "";
+    }
+    document.getElementById("missingRates").innerHTML = missing.length
+      ? `<span class="fail">No wage rate set for: ${missing.map(esc).join(", ")} — their shifts cost $0 in this total.</span>`
+      : "";
+
+    // Food cost % and prime cost %
+    const { rev: fRev, cogs, hasStocktake } = foodCostForWeek();
+    const foodEl = document.getElementById("foodPct");
+    const primeEl = document.getElementById("primePct");
+    let labourPctVal = null, foodPctVal = null;
+    if (rev > 0 && total > 0) labourPctVal = (total / rev) * 100;
+    if (fRev > 0 && cogs > 0) {
+      foodPctVal = (cogs / fRev) * 100;
+      foodEl.innerHTML = `<span class="${foodPctVal > 32 ? "pct-warn" : "pct-ok"}">${foodPctVal.toFixed(1)}% food</span>` +
+        `<span style="color:var(--dim); font-size:11px;"> ${hasStocktake ? "(COGS basis)" : "(purchases basis)"}</span>`;
+    } else {
+      foodEl.textContent = "";
+    }
+    if (labourPctVal != null && foodPctVal != null) {
+      const prime = labourPctVal + foodPctVal;
+      primeEl.innerHTML = `<span class="${prime > 60 ? "pct-warn" : "pct-ok"}">${prime.toFixed(1)}% prime</span>`;
+    } else {
+      primeEl.textContent = "";
+    }
+    renderVariance();
+  }
+  function revenueChanged() {
+    updateCosting();
+    scheduleRosterSave();
+  }
+  function stockChanged() {
+    updateCosting();
+    scheduleRosterSave();
+  }
+
+  /* ---------- The Larder ---------- */
+  let weekPurchases = { purchases: [], total: 0 };
+
+  async function loadPurchases() {
+    try {
+      const res = await fetch(`/api/purchases?week=${rosterWeekStart}&key=${encodeURIComponent(managerKey)}`);
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      weekPurchases = await res.json();
+      renderPurchases();
+      updateCosting();
+    } catch (err) {
+      document.getElementById("purchBody").innerHTML =
+        `<tr><td colspan="5" style="color: var(--dim);">Purchases didn't load — refresh to try again.</td></tr>`;
+    }
+  }
+
+  function renderPurchases() {
+    const { purchases, total } = weekPurchases;
+    const rows = purchases.map((p) => `
+      <tr>
+        <td>${fmtDay(p.date + "T12:00:00")}</td>
+        <td>${esc(p.supplier || "—")}</td>
+        <td>${esc(p.source === "whatsapp" ? "WhatsApp" : p.source === "invoice_photo" ? "Invoice photo" : "Dashboard")}</td>
+        <td class="amt">$${Number(p.amount).toFixed(2)}</td>
+        <td style="text-align:right;"><button class="del-btn" title="Remove this entry" onclick="deletePurchase('${esc(p.id)}')">✕</button></td>
+      </tr>`).join("");
+    const totalRow = purchases.length
+      ? `<tr class="total-row"><td colspan="3">This week</td><td class="amt">$${total.toFixed(2)}</td><td></td></tr>`
+      : "";
+    document.getElementById("purchBody").innerHTML =
+      rows + totalRow ||
+      `<tr><td colspan="5" style="color: var(--dim);">No purchases logged this week. Log one above, or text "spend 420 bidfood" to the bot.</td></tr>`;
+  }
+
+  async function addPurchase() {
+    const statusEl = document.getElementById("purchStatus");
+    const date = document.getElementById("purchDate").value;
+    const amount = Number(document.getElementById("purchAmount").value);
+    const supplier = document.getElementById("purchSupplier").value.trim();
+    if (!date || !isFinite(amount) || amount <= 0) {
+      statusEl.innerHTML = `<span class="fail">A date and a positive amount are both needed.</span>`;
+      return;
+    }
+    try {
+      const res = await fetch(`/api/purchases?key=${encodeURIComponent(managerKey)}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ date, amount, supplier }),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "Log failed");
+      statusEl.innerHTML = `<span class="ok">Logged.</span>`;
+      document.getElementById("purchAmount").value = "";
+      document.getElementById("purchSupplier").value = "";
+      loadPurchases();
+    } catch (err) {
+      statusEl.innerHTML = `<span class="fail">${esc(err.message || "Log failed — try again.")}</span>`;
+    }
+  }
+
+  async function deletePurchase(id) {
+    try {
+      const res = await fetch(`/api/purchases/${encodeURIComponent(id)}?key=${encodeURIComponent(managerKey)}`, { method: "DELETE" });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      loadPurchases();
+    } catch (err) {
+      alert("Couldn't remove that entry — try again.");
+    }
+  }
+
+  function foodCostForWeek() {
+    const rev = Number(document.getElementById("revenueInput").value);
+    const purchases = weekPurchases.total || 0;
+    const openRaw = document.getElementById("openingStock").value;
+    const closeRaw = document.getElementById("closingStock").value;
+    const hasStocktake = openRaw !== "" && closeRaw !== "";
+    const cogs = hasStocktake ? Number(openRaw) + purchases - Number(closeRaw) : purchases;
+    return { rev, cogs, hasStocktake };
+  }
+  function renderVariance() {
+    const el = document.getElementById("vaGrid");
+    if (!el || !window._actuals) return;
+    const { actualCost, actualMs, noRateActual } = window._actuals;
+    const rostered = rosterData ? rosterWeekCost().total : 0;
+    const diff = actualCost - rostered;
+    el.innerHTML = `
+      <div class="num-card">
+        <div class="label">Hours worked</div>
+        <div class="value">${fmtDuration(actualMs)}</div>
+        <div class="sub">closed shifts, breaks deducted</div>
+      </div>
+      <div class="num-card">
+        <div class="label">Actual labour cost</div>
+        <div class="value">$${actualCost.toFixed(0)}</div>
+        <div class="sub">${noRateActual.length ? "excludes (no rate): " + noRateActual.map(esc).join(", ") : "all crew have rates"}</div>
+      </div>
+      <div class="num-card">
+        <div class="label">Rostered cost (this week)</div>
+        <div class="value">$${rostered.toFixed(0)}</div>
+        <div class="sub">from the board above</div>
+      </div>
+      <div class="num-card">
+        <div class="label">Variance</div>
+        <div class="value ${diff > 0 ? "bad" : "good"}">${rostered > 0 ? (diff >= 0 ? "+" : "−") + "$" + Math.abs(diff).toFixed(0) : "—"}</div>
+        <div class="sub">${rostered > 0 ? "actual vs rostered" : "no roster cost to compare yet"}</div>
+      </div>`;
+  }
+
+  /* ---------- Penalty settings ---------- */
+  async function loadPenalties() {
+    try {
+      const res = await fetch(`/api/settings/penalties?key=${encodeURIComponent(managerKey)}`);
+      if (!res.ok) return;
+      const json = await res.json();
+      penaltyRules = json.penaltyRules;
+      fillPenaltyForm();
+      updateCosting();
+    } catch (err) { /* non-fatal */ }
+  }
+  function fillPenaltyForm() {
+    const r = penaltyRules || { ...PRESETS.US, publicHolidays: [], preset: "custom" };
+    document.getElementById("penSat").value = r.saturday;
+    document.getElementById("penSun").value = r.sunday;
+    document.getElementById("penPH").value = r.publicHoliday;
+    document.getElementById("penOTh").value = r.overtimeWeeklyHours;
+    document.getElementById("penOTx").value = r.overtimeMultiplier;
+    document.getElementById("penPHDates").value = (r.publicHolidays || []).join(", ");
+    document.getElementById("presetAU").classList.toggle("active", r.preset === "AU");
+    document.getElementById("presetUS").classList.toggle("active", r.preset === "US");
+    if (r.preset) activePreset = r.preset;
+  }
+  let activePreset = "custom";
+  function applyPreset(which) {
+    const p = PRESETS[which];
+    document.getElementById("penSat").value = p.saturday;
+    document.getElementById("penSun").value = p.sunday;
+    document.getElementById("penPH").value = p.publicHoliday;
+    document.getElementById("penOTh").value = p.overtimeWeeklyHours;
+    document.getElementById("penOTx").value = p.overtimeMultiplier;
+    activePreset = which;
+    document.getElementById("presetAU").classList.toggle("active", which === "AU");
+    document.getElementById("presetUS").classList.toggle("active", which === "US");
+    document.getElementById("penStatus").innerHTML =
+      `<span style="color: var(--dim);">Preset filled — review the numbers, then save.</span>`;
+  }
+  async function savePenalties() {
+    const statusEl = document.getElementById("penStatus");
+    const publicHolidays = document.getElementById("penPHDates").value
+      .split(",").map((s) => s.trim()).filter(Boolean);
+    const body = {
+      saturday: Number(document.getElementById("penSat").value),
+      sunday: Number(document.getElementById("penSun").value),
+      publicHoliday: Number(document.getElementById("penPH").value),
+      overtimeWeeklyHours: Number(document.getElementById("penOTh").value),
+      overtimeMultiplier: Number(document.getElementById("penOTx").value),
+      publicHolidays,
+      preset: activePreset,
+    };
+    try {
+      const res = await fetch(`/api/settings/penalties?key=${encodeURIComponent(managerKey)}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "Save failed");
+      penaltyRules = json.penaltyRules;
+      statusEl.innerHTML = `<span class="ok">Saved — costing updated.</span>`;
+      updateCosting();
+    } catch (err) {
+      statusEl.innerHTML = `<span class="fail">${esc(err.message || "Save failed.")}</span>`;
+    }
+  }
+
+  /* ---------- Boot ---------- */
+  document.getElementById("purchDate").value = new Date().toISOString().slice(0, 10);
+  document.getElementById("keyInput").addEventListener("keydown", (e) => {
+    if (e.key === "Enter") submitKey();
+  });
   if (managerKey) loadDashboard();
-  setInterval(() => { if (managerKey) loadDashboard(); }, 30000);
+  setInterval(() => { if (managerKey && document.getElementById("dashboard").style.display !== "none") loadDashboard(); }, 30000);
 </script>
 </body>
 </html>

@@ -520,11 +520,30 @@
   </section>
 
   <section>
+    <div class="stamp"><h2>Reports</h2><div class="rule"></div></div>
+    <div class="pen-panel">
+      <div class="larder-add">
+        <div class="field"><label>From</label><input id="repFrom" type="date" /></div>
+        <div class="field"><label>To</label><input id="repTo" type="date" /></div>
+        <button onclick="downloadPayroll()">Payroll CSV</button>
+        <button onclick="downloadPnl()" style="background: var(--lamp-deep);">Weekly P&amp;L CSV</button>
+        <span class="inline-msg" id="repStatus" style="margin: 0;"></span>
+      </div>
+      <p class="stock-note">
+        Payroll CSV: every closed shift in the range with effective times (amendments applied, originals included for audit),
+        paid hours, rate, weekend/holiday multiplier, weekly overtime lines and per-person totals — ready for the payment run.
+        Weekly P&amp;L CSV: revenue, actual labour, food purchases/COGS, and labour/food/prime percentages for the week
+        containing the "From" date. Pay figures are planning estimates on your configured rates — verify before paying.
+      </p>
+    </div>
+  </section>
+
+  <section>
     <div class="stamp"><h2>Crew</h2><div class="spacer"></div><button class="add-btn" onclick="openAddStaff()">+ Add crew</button></div>
     <div class="crew-search"><input id="crewSearch" type="search" placeholder="Search crew by name or phone…" oninput="crewSearchChanged()" /></div>
     <div class="table-wrap">
       <table class="data">
-        <thead><tr><th>Name</th><th>Role</th><th>Section</th><th>Phone</th><th>Rate</th></tr></thead>
+        <thead><tr><th>Name</th><th>Role</th><th>Section</th><th>Phone</th><th>Rate</th><th></th></tr></thead>
         <tbody id="staffBody"></tbody>
       </table>
     </div>
@@ -534,7 +553,7 @@
     <div class="stamp"><h2>Closed Dockets</h2><div class="rule"></div></div>
     <div class="table-wrap">
       <table class="data">
-        <thead><tr><th>Crew</th><th>Date</th><th>In</th><th>Out</th><th>Shift</th></tr></thead>
+        <thead><tr><th>Crew</th><th>Date</th><th>In</th><th>Out</th><th>Shift</th><th></th></tr></thead>
         <tbody id="historyBody"></tbody>
       </table>
     </div>
@@ -552,6 +571,21 @@
       <button class="cancel" onclick="closeTimeEditor()">Cancel</button>
       <button class="cancel" id="clearCellBtn" onclick="clearTimeCell()">Clear cell</button>
       <button class="save" onclick="setCustomTime()">Use these times</button>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="amendOverlay">
+  <div class="modal">
+    <h3>Amend Timesheet</h3>
+    <p class="mono" id="amendOriginal" style="font-size: 11px; color: var(--dim); margin: 0 0 14px; line-height: 1.6;"></p>
+    <div class="field"><label>Clock in</label><input id="amendIn" type="datetime-local" /></div>
+    <div class="field"><label>Clock out</label><input id="amendOut" type="datetime-local" /></div>
+    <div class="field"><label>Break (minutes)</label><input id="amendBreak" type="number" min="0" max="1440" step="1" /></div>
+    <p class="err mono" id="amendErr"></p>
+    <div class="modal-actions">
+      <button class="cancel" onclick="closeAmend()">Cancel</button>
+      <button class="save" onclick="saveAmend()">Save amendment</button>
     </div>
   </div>
 </div>
@@ -777,8 +811,9 @@
         <td>${esc(s.department || "—")}</td>
         <td>${esc(s.phone)}</td>
         <td>${s.wageRate != null ? "$" + Number(s.wageRate).toFixed(2) : "—"}</td>
+        <td style="text-align:right;"><button class="del-btn" title="Edit ${esc(s.name)}" onclick="openEditStaff('${esc(s.phone)}')">✎</button></td>
       </tr>`).join("") ||
-      `<tr><td colspan="5" style="color: var(--dim);">${staff.length ? "No crew match that filter." : "No crew yet — add your first crew member above."}</td></tr>`;
+      `<tr><td colspan="6" style="color: var(--dim);">${staff.length ? "No crew match that filter." : "No crew yet — add your first crew member above."}</td></tr>`;
 
     // Actuals for The Numbers
     let actualCost = 0, actualMs = 0;
@@ -833,23 +868,35 @@
         </div>`).join("");
 
     // Closed dockets
-    document.getElementById("historyBody").innerHTML = history.map((s) => `
+    document.getElementById("historyBody").innerHTML = history.map((s) => {
+      const eff = effective(s);
+      const amendedTag = s.amended
+        ? ` <span title="Original: ${fmtClock(s.clockIn.time)}–${fmtClock(s.clockOut.time)}" style="color: var(--lamp); cursor: help;">✎ amended</span>`
+        : "";
+      return `
       <tr>
-        <td>${esc(staffName(staff, s.staffPhone))}</td>
-        <td>${fmtDay(s.clockIn.time)}</td>
-        <td>${fmtClock(s.clockIn.time)}</td>
-        <td>${fmtClock(s.clockOut.time)}</td>
-        <td class="dur">${fmtDuration(new Date(s.clockOut.time) - new Date(s.clockIn.time))}</td>
-      </tr>`).join("") || `<tr><td colspan="5" style="color: var(--dim);">No closed shifts yet — they print here after the first clock-out.</td></tr>`;
+        <td>${esc(staffName(staff, s.staffPhone))}${amendedTag}</td>
+        <td>${fmtDay(eff.inIso)}</td>
+        <td>${fmtClock(eff.inIso)}</td>
+        <td>${fmtClock(eff.outIso)}</td>
+        <td class="dur">${fmtDuration(shiftMinusBreaks(s))}</td>
+        <td style="text-align:right;"><button class="del-btn" title="Amend this timesheet" onclick="openAmend('${esc(s.shiftId)}')">✎</button></td>
+      </tr>`;
+    }).join("") || `<tr><td colspan="6" style="color: var(--dim);">No closed shifts yet — they print here after the first clock-out.</td></tr>`;
   }
 
+  /** Effective (amended-aware) shift times — originals stay for comparison. */
+  function effective(shift) {
+    const inIso = (shift.amended && shift.amended.clockInTime) || shift.clockIn.time;
+    const outIso = (shift.amended && shift.amended.clockOutTime) || (shift.clockOut && shift.clockOut.time);
+    const breakMs = shift.amended && shift.amended.breakMinutes != null
+      ? shift.amended.breakMinutes * 60000
+      : (shift.breaks || []).reduce((sum, b) => (b.end ? sum + (new Date(b.end) - new Date(b.start)) : sum), 0);
+    return { inIso, outIso, breakMs };
+  }
   function shiftMinusBreaks(shift) {
-    const totalMs = new Date(shift.clockOut.time) - new Date(shift.clockIn.time);
-    const breakMs = (shift.breaks || []).reduce((sum, b) => {
-      if (!b.end) return sum;
-      return sum + (new Date(b.end) - new Date(b.start));
-    }, 0);
-    return Math.max(0, totalMs - breakMs);
+    const eff = effective(shift);
+    return Math.max(0, new Date(eff.outIso) - new Date(eff.inIso) - eff.breakMs);
   }
 
   async function forceClose(shiftId, btnEl) {
@@ -863,6 +910,59 @@
       btnEl.disabled = false;
       alert("Couldn't close that shift: " + (err.message || "unknown error") +
         ". If this says HTTP 404, the server is running an old server.js — redeploy it.");
+    }
+  }
+
+  /* ---------- Timesheet amendments ---------- */
+  let amendTarget = null;
+  function toLocalInput(iso) {
+    const d = new Date(iso);
+    const p = (n) => String(n).padStart(2, "0");
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}`;
+  }
+  function openAmend(shiftId) {
+    const s = (window._core?.shifts || []).find((x) => x.shiftId === shiftId);
+    if (!s || !s.clockOut) return;
+    amendTarget = shiftId;
+    const eff = effective(s);
+    const origBreakMin = Math.round(
+      (s.breaks || []).reduce((sum, b) => (b.end ? sum + (new Date(b.end) - new Date(b.start)) : sum), 0) / 60000
+    );
+    document.getElementById("amendOriginal").innerHTML =
+      `Original (kept for the audit trail):<br>` +
+      `${fmtDay(s.clockIn.time)} · in ${fmtClock(s.clockIn.time)} · out ${fmtClock(s.clockOut.time)} · break ${origBreakMin}m` +
+      (s.clockOut.forcedByManager ? " · closed by manager" : "");
+    document.getElementById("amendIn").value = toLocalInput(eff.inIso);
+    document.getElementById("amendOut").value = toLocalInput(eff.outIso);
+    document.getElementById("amendBreak").value = Math.round(eff.breakMs / 60000);
+    document.getElementById("amendErr").textContent = "";
+    document.getElementById("amendOverlay").classList.add("open");
+  }
+  function closeAmend() {
+    document.getElementById("amendOverlay").classList.remove("open");
+    amendTarget = null;
+  }
+  async function saveAmend() {
+    const errEl = document.getElementById("amendErr");
+    const inVal = document.getElementById("amendIn").value;
+    const outVal = document.getElementById("amendOut").value;
+    const breakMinutes = Number(document.getElementById("amendBreak").value || 0);
+    if (!inVal || !outVal) { errEl.textContent = "Both times are needed."; return; }
+    const inIso = new Date(inVal).toISOString();
+    const outIso = new Date(outVal).toISOString();
+    if (new Date(outIso) <= new Date(inIso)) { errEl.textContent = "Clock out must be after clock in."; return; }
+    try {
+      const res = await fetch(`/api/shifts/${encodeURIComponent(amendTarget)}/amend?key=${encodeURIComponent(managerKey)}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ clockInTime: inIso, clockOutTime: outIso, breakMinutes }),
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(json.error || `HTTP ${res.status}`);
+      closeAmend();
+      await loadDashboard();
+    } catch (err) {
+      errEl.textContent = err.message || "Couldn't save — try again.";
     }
   }
 
@@ -888,6 +988,19 @@
     document.getElementById("addStaffErr").textContent = "";
     ["newName", "newPhone", "newDept", "newWage"].forEach((id) => (document.getElementById(id).value = ""));
     document.getElementById("newRole").value = "staff";
+    document.getElementById("newPhone").readOnly = false;
+    document.getElementById("addStaffOverlay").classList.add("open");
+  }
+  function openEditStaff(phone) {
+    const s = (window._core?.staff || []).find((x) => x.phone === phone);
+    if (!s) return;
+    document.getElementById("addStaffErr").textContent = "";
+    document.getElementById("newName").value = s.name || "";
+    document.getElementById("newPhone").value = s.phone;
+    document.getElementById("newPhone").readOnly = true; // phone is the record ID
+    document.getElementById("newRole").value = s.role || "staff";
+    document.getElementById("newDept").value = s.department || "";
+    document.getElementById("newWage").value = s.wageRate != null ? s.wageRate : "";
     document.getElementById("addStaffOverlay").classList.add("open");
   }
   function closeAddStaff() {
@@ -1144,6 +1257,14 @@
       brush = value;
       localStorage.setItem(BRUSH_KEY, brush);
       renderBrushLabel();
+  (function initReportRange() {
+    const lastMon = new Date(mondayOf(new Date()) + "T12:00:00");
+    lastMon.setDate(lastMon.getDate() - 7);
+    const lastSun = new Date(lastMon);
+    lastSun.setDate(lastSun.getDate() + 6);
+    document.getElementById("repFrom").value = lastMon.toISOString().slice(0, 10);
+    document.getElementById("repTo").value = lastSun.toISOString().slice(0, 10);
+  })();
     } else if (timeCellTarget) {
       const { dateIso, phone } = timeCellTarget;
       const assignments = rosterData.roster.assignments = rosterData.roster.assignments || {};
@@ -1494,9 +1615,107 @@
     }
   }
 
+  /* ---------- Reports ---------- */
+  function csvEscape(v) {
+    if (v == null) return "";
+    const s = String(v);
+    return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+  }
+  function downloadCsv(filename, rows) {
+    const csv = rows.map((r) => r.map(csvEscape).join(",")).join("\n");
+    const blob = new Blob(["\ufeff" + csv], { type: "text/csv;charset=utf-8" });
+    const a = document.createElement("a");
+    a.href = URL.createObjectURL(blob);
+    a.download = filename;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  }
+  async function downloadPayroll() {
+    const from = document.getElementById("repFrom").value;
+    const to = document.getElementById("repTo").value;
+    const statusEl = document.getElementById("repStatus");
+    if (!from || !to) { statusEl.innerHTML = `<span class="fail">Pick both dates.</span>`; return; }
+    statusEl.textContent = "Building…";
+    try {
+      const res = await fetch(`/api/reports/payroll?from=${from}&to=${to}&key=${encodeURIComponent(managerKey)}`);
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "Report failed");
+      const rows = [
+        ["Staff", "Date", "Clock in", "Clock out", "Break (min)", "Hours", "Rate", "Day multiplier", "Pay", "Amended", "Original in", "Original out", "Closed by manager"],
+        ...json.rows.map((r) => [
+          r.name, r.date,
+          new Date(r.clockIn).toLocaleTimeString("en-AU", { hour: "2-digit", minute: "2-digit" }),
+          new Date(r.clockOut).toLocaleTimeString("en-AU", { hour: "2-digit", minute: "2-digit" }),
+          r.breakMinutes, r.hours,
+          r.rate != null ? r.rate.toFixed ? r.rate.toFixed(2) : r.rate : "MISSING",
+          r.multiplier, r.pay != null ? r.pay : "—",
+          r.amended ? "YES" : "",
+          r.originalClockIn ? new Date(r.originalClockIn).toLocaleString("en-AU") : "",
+          r.originalClockOut ? new Date(r.originalClockOut).toLocaleString("en-AU") : "",
+          r.forcedByManager ? "YES" : "",
+        ]),
+        [],
+        ["Weekly overtime premiums"],
+        ["Staff", "Week starting", "OT hours", "Premium"],
+        ...json.otRows.map((o) => [o.name, o.weekStart, o.overtimeHours, o.premium]),
+        [],
+        ["Totals per staff"],
+        ["Staff", "Hours", "Pay", "Note"],
+        ...Object.values(json.perStaff).map((t) => [
+          t.name, t.hours.toFixed(2), t.pay.toFixed(2), t.missingRate ? "some shifts missing a wage rate" : "",
+        ]),
+        [],
+        ["GRAND TOTAL", json.grand.hours.toFixed(2), json.grand.pay.toFixed(2),
+          json.rulesApplied ? "penalty rules applied" : "NO penalty rules configured"],
+      ];
+      downloadCsv(`payroll_${from}_to_${to}.csv`, rows);
+      statusEl.innerHTML = `<span class="ok">Downloaded.</span>`;
+    } catch (err) {
+      statusEl.innerHTML = `<span class="fail">${esc(err.message || "Report failed.")}</span>`;
+    }
+  }
+  async function downloadPnl() {
+    const from = document.getElementById("repFrom").value;
+    const statusEl = document.getElementById("repStatus");
+    if (!from) { statusEl.innerHTML = `<span class="fail">Pick a From date — its week is reported.</span>`; return; }
+    statusEl.textContent = "Building…";
+    try {
+      const week = mondayOf(new Date(from + "T12:00:00"));
+      const res = await fetch(`/api/reports/pnl?week=${week}&key=${encodeURIComponent(managerKey)}`);
+      const json = await res.json();
+      if (!res.ok) throw new Error(json.error || "Report failed");
+      const rows = [
+        ["Weekly P&L", `week starting ${json.week}`],
+        [],
+        ["Revenue (forecast/entered)", json.revenue != null ? json.revenue : "not entered"],
+        ["Labour cost (actual, amended-aware)", json.labourCost],
+        ["Food purchases", json.purchases],
+        ["Opening stock", json.openingStock != null ? json.openingStock : ""],
+        ["Closing stock", json.closingStock != null ? json.closingStock : ""],
+        ["COGS (" + json.cogsBasis + " basis)", json.cogs],
+        [],
+        ["Labour %", json.labourPct != null ? json.labourPct : "needs revenue"],
+        ["Food %", json.foodPct != null ? json.foodPct : "needs revenue"],
+        ["Prime %", json.primePct != null ? json.primePct : "needs revenue"],
+      ];
+      downloadCsv(`pnl_week_${json.week}.csv`, rows);
+      statusEl.innerHTML = `<span class="ok">Downloaded.</span>`;
+    } catch (err) {
+      statusEl.innerHTML = `<span class="fail">${esc(err.message || "Report failed.")}</span>`;
+    }
+  }
+
   /* ---------- Boot ---------- */
   document.getElementById("purchDate").value = new Date().toISOString().slice(0, 10);
   renderBrushLabel();
+  (function initReportRange() {
+    const lastMon = new Date(mondayOf(new Date()) + "T12:00:00");
+    lastMon.setDate(lastMon.getDate() - 7);
+    const lastSun = new Date(lastMon);
+    lastSun.setDate(lastSun.getDate() + 6);
+    document.getElementById("repFrom").value = lastMon.toISOString().slice(0, 10);
+    document.getElementById("repTo").value = lastSun.toISOString().slice(0, 10);
+  })();
   document.getElementById("keyInput").addEventListener("keydown", (e) => {
     if (e.key === "Enter") submitKey();
   });

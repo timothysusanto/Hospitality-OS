@@ -198,6 +198,7 @@
   .cell.slot-PM { background: #3F3663; color: #DFD6F7; }
   .cell.slot-ALL { background: var(--herb-deep); color: #E2F0E1; }
   .cell.conflict { box-shadow: inset 0 0 0 2px var(--lamp); }
+  .cell.slot-CUSTOM { background: #1E4B4B; color: #D2EFEF; font-size: 9px; letter-spacing: 0; }
   .legend { display: flex; gap: 16px; flex-wrap: wrap; margin-top: 10px; font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: var(--dim); }
   .chip { display: inline-block; width: 12px; height: 12px; border-radius: 3px; vertical-align: -1px; margin-right: 6px; }
 
@@ -418,6 +419,8 @@
       <span><span class="chip" style="background:#1E2A1D;"></span>Available</span>
       <span><span class="chip" style="background:#2E1B1A;"></span>Unavailable</span>
       <span><span class="chip" style="box-shadow: inset 0 0 0 2px var(--lamp); background:transparent;"></span>Outside availability</span>
+      <span><span class="chip" style="background:#1E4B4B;"></span>Custom times</span>
+      <span style="color: var(--dim);">Click a cell to cycle · double-click for custom 24h times</span>
     </div>
     <p class="scale-note" id="boardScaleNote"></p>
     <div class="cost-line">
@@ -426,7 +429,7 @@
       <span id="labourPct"></span>
       <span id="foodPct"></span>
       <span id="primePct"></span>
-      <span class="cost-note">Costing uses your Cost Settings below (weekend and holiday multipliers, weekly overtime) on flat hourly rates. Planning estimates, not payroll. Slot hours: AM 5h · PM 6h · All day 10h.</span>
+      <span class="cost-note">Costing uses your Cost Settings below (weekend and holiday multipliers, weekly overtime) on flat hourly rates. Planning estimates, not payroll. Slot hours are set in Cost Settings below; double-click any board cell for exact 24h times.</span>
     </div>
     <p class="inline-msg" id="missingRates"></p>
     <p class="inline-msg" id="publishResult"></p>
@@ -480,6 +483,11 @@
         <div class="field"><label>Overtime after (h/week)</label><input id="penOTh" type="number" step="1" min="1" max="168" /></div>
         <div class="field"><label>Overtime ×</label><input id="penOTx" type="number" step="0.05" min="1" max="5" /></div>
       </div>
+      <div class="pen-fields" style="margin-top: 14px;">
+        <div class="field"><label>AM slot hours</label><input id="slotAM" type="number" step="0.5" min="0.5" max="24" /></div>
+        <div class="field"><label>PM slot hours</label><input id="slotPM" type="number" step="0.5" min="0.5" max="24" /></div>
+        <div class="field"><label>All-day slot hours</label><input id="slotALL" type="number" step="0.5" min="0.5" max="24" /></div>
+      </div>
       <div class="field" style="margin-top: 14px;">
         <label>Public holiday dates (YYYY-MM-DD, comma separated)</label>
         <input id="penPHDates" type="text" placeholder="e.g. 2026-12-25, 2026-12-26, 2027-01-01" />
@@ -517,6 +525,20 @@
       </table>
     </div>
   </section>
+</div>
+
+<div class="overlay" id="timeOverlay">
+  <div class="modal">
+    <h3>Custom Shift Times</h3>
+    <div class="field"><label>Start (24h)</label><input id="timeStart" type="time" /></div>
+    <div class="field"><label>End (24h) — overnight is fine (e.g. 18:00 → 02:00)</label><input id="timeEnd" type="time" /></div>
+    <p class="err mono" id="timeErr"></p>
+    <div class="modal-actions">
+      <button class="cancel" onclick="closeTimeEditor()">Cancel</button>
+      <button class="cancel" onclick="clearTimeCell()">Clear cell</button>
+      <button class="save" onclick="setCustomTime()">Set times</button>
+    </div>
+  </div>
 </div>
 
 <div class="overlay" id="addStaffOverlay">
@@ -689,6 +711,7 @@
             <span class="c-name">${esc(staffName(staff, s.staffPhone))}</span>
             <span class="c-dept">${esc(staffDept(staff, s.staffPhone))}</span>
             <span class="c-time">⏱ ${fmtDuration(elapsed)}</span>
+            <button class="del-btn" title="Clock out now" onclick="forceClose('${esc(s.shiftId)}', this)">⏻</button>
           </div>`;
       }).join("")}</div>`;
     } else {
@@ -701,6 +724,7 @@
             <div class="dept">${esc(staffDept(staff, s.staffPhone))}</div>
             <div class="elapsed">⏱ ${fmtDuration(elapsed)}</div>
             <div class="since">on since ${fmtClock(s.clockIn.time)}</div>
+            <div class="actions"><button class="approve" onclick="forceClose('${esc(s.shiftId)}', this)">Clock out now</button></div>
           </div>`;
       }).join("")}</div>`;
     }
@@ -813,6 +837,19 @@
     return Math.max(0, totalMs - breakMs);
   }
 
+  async function forceClose(shiftId, btnEl) {
+    if (!confirm("Clock this person out now? Their shift closes at the current time.")) return;
+    btnEl.disabled = true;
+    try {
+      const res = await fetch(`/api/shifts/${encodeURIComponent(shiftId)}/close?key=${encodeURIComponent(managerKey)}`, { method: "POST" });
+      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      await loadDashboard();
+    } catch (err) {
+      btnEl.disabled = false;
+      alert("Couldn't close that shift — try again.");
+    }
+  }
+
   async function review(shiftId, approve, btnEl) {
     const card = btnEl.closest(".ticket");
     card.querySelectorAll("button").forEach((b) => (b.disabled = true));
@@ -872,7 +909,6 @@
 
   /* ---------- Roster ---------- */
   const SLOT_CYCLE = ["", "AM", "PM", "ALL"];
-  const SLOT_HOURS = { AM: 5, PM: 6, ALL: 10 };
   const DAY_KEY_BY_INDEX = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
   let rosterWeekStart = mondayOf(new Date());
   let rosterData = null;
@@ -960,8 +996,11 @@
         else if (avail === true) cls += " avail";
         else if (avail === false) cls += " unavail";
         if (slot && avail === false) cls += " conflict";
-        const title = slot && avail === false ? "Assigned outside declared availability" : "";
-        return `<td><button class="${cls}" title="${title}" onclick="cycleCell('${dateIso}','${esc(person.phone)}')">${slot}</button></td>`;
+        const isCustom = /^\d{2}:\d{2}-\d{2}:\d{2}$/.test(slot);
+        if (isCustom) cls = cls.replace(`slot-${slot}`, "slot-CUSTOM");
+        const label = isCustom ? slot.replace("-", "–") : slot;
+        const title = slot && avail === false ? "Assigned outside declared availability" : "Click: cycle AM/PM/All · Double-click: custom times";
+        return `<td><button class="${cls}" title="${title}" onclick="cellClick(event,'${dateIso}','${esc(person.phone)}')" ondblclick="openTimeEditor(event,'${dateIso}','${esc(person.phone)}')">${label}</button></td>`;
       }).join("");
       return `<tr><td class="crew-cell">${esc(person.name)}</td>${cells}</tr>`;
     }).join("");
@@ -980,15 +1019,81 @@
     }
     updateCosting();
   }
+  let cellClickTimer = null;
+  function cellClick(ev, dateIso, phone) {
+    // Delay the cycle slightly so a double-click can cancel it and open
+    // the custom-time editor instead — single clicks stay one-click fast.
+    clearTimeout(cellClickTimer);
+    cellClickTimer = setTimeout(() => cycleCell(dateIso, phone), 220);
+  }
   function cycleCell(dateIso, phone) {
     const assignments = rosterData.roster.assignments = rosterData.roster.assignments || {};
     const day = assignments[dateIso] = assignments[dateIso] || {};
     const current = day[phone] || "";
-    const next = SLOT_CYCLE[(SLOT_CYCLE.indexOf(current) + 1) % SLOT_CYCLE.length];
+    const idx = SLOT_CYCLE.indexOf(current); // custom strings -> -1 -> cycles to empty
+    const next = SLOT_CYCLE[(idx + 1) % SLOT_CYCLE.length];
     if (next) day[phone] = next;
     else delete day[phone];
     renderRoster();
     scheduleRosterSave();
+  }
+
+  let timeCellTarget = null;
+  function openTimeEditor(ev, dateIso, phone) {
+    clearTimeout(cellClickTimer); // cancel the pending single-click cycle
+    timeCellTarget = { dateIso, phone };
+    const current = rosterData.roster.assignments?.[dateIso]?.[phone] || "";
+    const m = current.match(/^(\d{2}:\d{2})-(\d{2}:\d{2})$/);
+    document.getElementById("timeStart").value = m ? m[1] : "09:00";
+    document.getElementById("timeEnd").value = m ? m[2] : "17:00";
+    document.getElementById("timeErr").textContent = "";
+    document.getElementById("timeOverlay").classList.add("open");
+  }
+  function closeTimeEditor() {
+    document.getElementById("timeOverlay").classList.remove("open");
+    timeCellTarget = null;
+  }
+  function clearTimeCell() {
+    if (!timeCellTarget) return;
+    const { dateIso, phone } = timeCellTarget;
+    const day = rosterData.roster.assignments?.[dateIso];
+    if (day) delete day[phone];
+    closeTimeEditor();
+    renderRoster();
+    scheduleRosterSave();
+  }
+  function setCustomTime() {
+    if (!timeCellTarget) return;
+    const start = document.getElementById("timeStart").value;
+    const end = document.getElementById("timeEnd").value;
+    if (!start || !end) {
+      document.getElementById("timeErr").textContent = "Both a start and an end time are needed.";
+      return;
+    }
+    if (start === end) {
+      document.getElementById("timeErr").textContent = "Start and end can't be the same time.";
+      return;
+    }
+    const { dateIso, phone } = timeCellTarget;
+    const assignments = rosterData.roster.assignments = rosterData.roster.assignments || {};
+    const day = assignments[dateIso] = assignments[dateIso] || {};
+    day[phone] = `${start}-${end}`;
+    closeTimeEditor();
+    renderRoster();
+    scheduleRosterSave();
+  }
+
+  /** Hours for any slot value: preset (venue-tuned) or custom range (overnight OK). */
+  function hoursForSlot(slot) {
+    const m = String(slot).match(/^(\d{2}):(\d{2})-(\d{2}):(\d{2})$/);
+    if (m) {
+      const start = Number(m[1]) + Number(m[2]) / 60;
+      let end = Number(m[3]) + Number(m[4]) / 60;
+      if (end <= start) end += 24; // overnight shift, e.g. 18:00-02:00
+      return end - start;
+    }
+    const sh = (penaltyRules && penaltyRules.slotHours) || {};
+    return { AM: sh.AM ?? 5, PM: sh.PM ?? 6, ALL: sh.ALL ?? 10 }[slot] || 0;
   }
   function scheduleRosterSave() {
     clearTimeout(rosterSaveTimer);
@@ -1067,7 +1172,7 @@
         if (!slot) continue;
         const person = staff.find((s) => s.phone === phone);
         const rate = person && person.wageRate != null ? Number(person.wageRate) : null;
-        const hours = SLOT_HOURS[slot] || 0;
+        const hours = hoursForSlot(slot);
         if (rate == null) {
           if (person) missing.add(person.name);
           continue;
@@ -1261,6 +1366,10 @@
     document.getElementById("penOTh").value = r.overtimeWeeklyHours;
     document.getElementById("penOTx").value = r.overtimeMultiplier;
     document.getElementById("penPHDates").value = (r.publicHolidays || []).join(", ");
+    const sh = r.slotHours || {};
+    document.getElementById("slotAM").value = sh.AM ?? 5;
+    document.getElementById("slotPM").value = sh.PM ?? 6;
+    document.getElementById("slotALL").value = sh.ALL ?? 10;
     document.getElementById("presetAU").classList.toggle("active", r.preset === "AU");
     document.getElementById("presetUS").classList.toggle("active", r.preset === "US");
     if (r.preset) activePreset = r.preset;
@@ -1291,6 +1400,11 @@
       overtimeMultiplier: Number(document.getElementById("penOTx").value),
       publicHolidays,
       preset: activePreset,
+      slotHours: {
+        AM: Number(document.getElementById("slotAM").value),
+        PM: Number(document.getElementById("slotPM").value),
+        ALL: Number(document.getElementById("slotALL").value),
+      },
     };
     try {
       const res = await fetch(`/api/settings/penalties?key=${encodeURIComponent(managerKey)}`, {

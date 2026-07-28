@@ -198,7 +198,20 @@
   .cell.slot-PM { background: #3F3663; color: #DFD6F7; }
   .cell.slot-ALL { background: var(--herb-deep); color: #E2F0E1; }
   .cell.conflict { box-shadow: inset 0 0 0 2px var(--lamp); }
-  .cell.slot-CUSTOM { background: #1E4B4B; color: #D2EFEF; font-size: 9px; letter-spacing: 0; }
+  .cell.slot-CUSTOM { background: #1E4B4B; color: #D2EFEF; font-size: 10px; letter-spacing: 0; }
+  .brush-btn {
+    padding: 8px 14px; border-radius: 6px; cursor: pointer;
+    background: var(--panel); border: 1px solid var(--lamp-deep); color: var(--lamp);
+    font-family: 'IBM Plex Mono', monospace; font-size: 12px; font-weight: 600;
+  }
+  .brush-btn:hover { background: #2A241B; }
+  .quick-chips { display: flex; gap: 8px; flex-wrap: wrap; margin-bottom: 14px; }
+  .q-chip {
+    padding: 7px 12px; border-radius: 999px; cursor: pointer;
+    background: var(--steel); border: 1px solid var(--seam); color: var(--text);
+    font-family: 'IBM Plex Mono', monospace; font-size: 12px; font-weight: 600;
+  }
+  .q-chip:hover { border-color: var(--lamp); color: var(--lamp); }
   .legend { display: flex; gap: 16px; flex-wrap: wrap; margin-top: 10px; font-family: 'IBM Plex Mono', monospace; font-size: 11px; color: var(--dim); }
   .chip { display: inline-block; width: 12px; height: 12px; border-radius: 3px; vertical-align: -1px; margin-right: 6px; }
 
@@ -404,6 +417,7 @@
       <button class="week-nav" onclick="changeWeek(-1)" aria-label="Previous week">‹</button>
       <span class="week-label" id="weekLabel"></span>
       <button class="week-nav" onclick="changeWeek(1)" aria-label="Next week">›</button>
+      <button class="brush-btn" id="brushBtn" onclick="openBrushEditor()" title="The shift time a click paints onto cells">🖌 <span id="brushLabel">All day</span></button>
       <button class="publish-btn" id="publishBtn" onclick="publishRoster()">Send roster to WhatsApp</button>
     </div>
     <div class="board-wrap">
@@ -420,7 +434,7 @@
       <span><span class="chip" style="background:#2E1B1A;"></span>Unavailable</span>
       <span><span class="chip" style="box-shadow: inset 0 0 0 2px var(--lamp); background:transparent;"></span>Outside availability</span>
       <span><span class="chip" style="background:#1E4B4B;"></span>Custom times</span>
-      <span style="color: var(--dim);">Click a cell to cycle · double-click for custom 24h times</span>
+      <span style="color: var(--dim);">Click paints the brush time · click again clears · double-click edits one cell</span>
     </div>
     <p class="scale-note" id="boardScaleNote"></p>
     <div class="cost-line">
@@ -529,14 +543,15 @@
 
 <div class="overlay" id="timeOverlay">
   <div class="modal">
-    <h3>Custom Shift Times</h3>
+    <h3 id="timeTitle">Shift Times</h3>
+    <div class="quick-chips" id="quickChips"></div>
     <div class="field"><label>Start (24h)</label><input id="timeStart" type="time" /></div>
     <div class="field"><label>End (24h) — overnight is fine (e.g. 18:00 → 02:00)</label><input id="timeEnd" type="time" /></div>
     <p class="err mono" id="timeErr"></p>
     <div class="modal-actions">
       <button class="cancel" onclick="closeTimeEditor()">Cancel</button>
-      <button class="cancel" onclick="clearTimeCell()">Clear cell</button>
-      <button class="save" onclick="setCustomTime()">Set times</button>
+      <button class="cancel" id="clearCellBtn" onclick="clearTimeCell()">Clear cell</button>
+      <button class="save" onclick="setCustomTime()">Use these times</button>
     </div>
   </div>
 </div>
@@ -846,7 +861,8 @@
       await loadDashboard();
     } catch (err) {
       btnEl.disabled = false;
-      alert("Couldn't close that shift — try again.");
+      alert("Couldn't close that shift: " + (err.message || "unknown error") +
+        ". If this says HTTP 404, the server is running an old server.js — redeploy it.");
     }
   }
 
@@ -908,7 +924,6 @@
   }
 
   /* ---------- Roster ---------- */
-  const SLOT_CYCLE = ["", "AM", "PM", "ALL"];
   const DAY_KEY_BY_INDEX = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"];
   let rosterWeekStart = mondayOf(new Date());
   let rosterData = null;
@@ -998,8 +1013,8 @@
         if (slot && avail === false) cls += " conflict";
         const isCustom = /^\d{2}:\d{2}-\d{2}:\d{2}$/.test(slot);
         if (isCustom) cls = cls.replace(`slot-${slot}`, "slot-CUSTOM");
-        const label = isCustom ? slot.replace("-", "–") : slot;
-        const title = slot && avail === false ? "Assigned outside declared availability" : "Click: cycle AM/PM/All · Double-click: custom times";
+        const label = slot ? (isCustom ? fmtSlotLabel(slot) : slot) : "";
+        const title = slot && avail === false ? "Assigned outside declared availability" : "Click: paint/clear · Double-click: edit times";
         return `<td><button class="${cls}" title="${title}" onclick="cellClick(event,'${dateIso}','${esc(person.phone)}')" ondblclick="openTimeEditor(event,'${dateIso}','${esc(person.phone)}')">${label}</button></td>`;
       }).join("");
       return `<tr><td class="crew-cell">${esc(person.name)}</td>${cells}</tr>`;
@@ -1019,35 +1034,83 @@
     }
     updateCosting();
   }
+  /* ---------- The brush: one click paints a shift, click again clears ---------- */
+  const BRUSH_KEY = "hos_brush";
+  const RECENTS_KEY = "hos_recent_times";
+  let brush = localStorage.getItem(BRUSH_KEY) || "ALL";
+  let editorMode = "cell"; // "brush" | "cell"
+  let timeCellTarget = null;
   let cellClickTimer = null;
-  function cellClick(ev, dateIso, phone) {
-    // Delay the cycle slightly so a double-click can cancel it and open
-    // the custom-time editor instead — single clicks stay one-click fast.
-    clearTimeout(cellClickTimer);
-    cellClickTimer = setTimeout(() => cycleCell(dateIso, phone), 220);
+
+  function fmtSlotLabel(slot) {
+    const m = String(slot).match(/^(\d{2}):(\d{2})-(\d{2}):(\d{2})$/);
+    if (!m) return slot === "ALL" ? "All day" : slot;
+    const t = (h, mm) => (mm === "00" ? String(Number(h)) : `${Number(h)}:${mm}`);
+    return `${t(m[1], m[2])}–${t(m[3], m[4])}`;
   }
-  function cycleCell(dateIso, phone) {
-    const assignments = rosterData.roster.assignments = rosterData.roster.assignments || {};
-    const day = assignments[dateIso] = assignments[dateIso] || {};
-    const current = day[phone] || "";
-    const idx = SLOT_CYCLE.indexOf(current); // custom strings -> -1 -> cycles to empty
-    const next = SLOT_CYCLE[(idx + 1) % SLOT_CYCLE.length];
-    if (next) day[phone] = next;
-    else delete day[phone];
-    renderRoster();
-    scheduleRosterSave();
+  function renderBrushLabel() {
+    document.getElementById("brushLabel").textContent = fmtSlotLabel(brush);
+  }
+  function getRecents() {
+    try { return JSON.parse(localStorage.getItem(RECENTS_KEY)) || []; } catch { return []; }
+  }
+  function pushRecent(range) {
+    const recents = getRecents().filter((r) => r !== range);
+    recents.unshift(range);
+    localStorage.setItem(RECENTS_KEY, JSON.stringify(recents.slice(0, 6)));
   }
 
-  let timeCellTarget = null;
+  function cellClick(ev, dateIso, phone) {
+    clearTimeout(cellClickTimer);
+    cellClickTimer = setTimeout(() => {
+      const assignments = rosterData.roster.assignments = rosterData.roster.assignments || {};
+      const day = assignments[dateIso] = assignments[dateIso] || {};
+      if (day[phone]) delete day[phone];       // filled -> clear
+      else day[phone] = brush;                  // empty -> paint the brush time
+      renderRoster();
+      scheduleRosterSave();
+    }, 220); // small delay so double-click can cancel and open the editor
+  }
+
+  function renderQuickChips() {
+    const chips = [
+      { value: "AM", label: "AM" },
+      { value: "PM", label: "PM" },
+      { value: "ALL", label: "All day" },
+      ...getRecents().map((r) => ({ value: r, label: fmtSlotLabel(r) })),
+    ];
+    document.getElementById("quickChips").innerHTML = chips.map((c) =>
+      `<button class="q-chip" onclick="pickQuick('${esc(c.value)}')">${esc(c.label)}</button>`
+    ).join("");
+  }
+  function pickQuick(value) {
+    applyEditorValue(value);
+  }
+
+  function openBrushEditor() {
+    editorMode = "brush";
+    timeCellTarget = null;
+    document.getElementById("timeTitle").textContent = "Brush — the shift a click paints";
+    document.getElementById("clearCellBtn").style.display = "none";
+    prefillEditor(brush);
+    renderQuickChips();
+    document.getElementById("timeOverlay").classList.add("open");
+  }
   function openTimeEditor(ev, dateIso, phone) {
-    clearTimeout(cellClickTimer); // cancel the pending single-click cycle
+    clearTimeout(cellClickTimer);
+    editorMode = "cell";
     timeCellTarget = { dateIso, phone };
-    const current = rosterData.roster.assignments?.[dateIso]?.[phone] || "";
-    const m = current.match(/^(\d{2}:\d{2})-(\d{2}:\d{2})$/);
+    document.getElementById("timeTitle").textContent = "Edit this cell's shift";
+    document.getElementById("clearCellBtn").style.display = "";
+    prefillEditor(rosterData.roster.assignments?.[dateIso]?.[phone] || brush);
+    renderQuickChips();
+    document.getElementById("timeOverlay").classList.add("open");
+  }
+  function prefillEditor(value) {
+    const m = String(value).match(/^(\d{2}:\d{2})-(\d{2}:\d{2})$/);
     document.getElementById("timeStart").value = m ? m[1] : "09:00";
     document.getElementById("timeEnd").value = m ? m[2] : "17:00";
     document.getElementById("timeErr").textContent = "";
-    document.getElementById("timeOverlay").classList.add("open");
   }
   function closeTimeEditor() {
     document.getElementById("timeOverlay").classList.remove("open");
@@ -1063,7 +1126,6 @@
     scheduleRosterSave();
   }
   function setCustomTime() {
-    if (!timeCellTarget) return;
     const start = document.getElementById("timeStart").value;
     const end = document.getElementById("timeEnd").value;
     if (!start || !end) {
@@ -1074,13 +1136,23 @@
       document.getElementById("timeErr").textContent = "Start and end can't be the same time.";
       return;
     }
-    const { dateIso, phone } = timeCellTarget;
-    const assignments = rosterData.roster.assignments = rosterData.roster.assignments || {};
-    const day = assignments[dateIso] = assignments[dateIso] || {};
-    day[phone] = `${start}-${end}`;
+    applyEditorValue(`${start}-${end}`);
+  }
+  function applyEditorValue(value) {
+    if (/^\d{2}:\d{2}-\d{2}:\d{2}$/.test(value)) pushRecent(value);
+    if (editorMode === "brush") {
+      brush = value;
+      localStorage.setItem(BRUSH_KEY, brush);
+      renderBrushLabel();
+    } else if (timeCellTarget) {
+      const { dateIso, phone } = timeCellTarget;
+      const assignments = rosterData.roster.assignments = rosterData.roster.assignments || {};
+      const day = assignments[dateIso] = assignments[dateIso] || {};
+      day[phone] = value;
+      renderRoster();
+      scheduleRosterSave();
+    }
     closeTimeEditor();
-    renderRoster();
-    scheduleRosterSave();
   }
 
   /** Hours for any slot value: preset (venue-tuned) or custom range (overnight OK). */
@@ -1424,6 +1496,7 @@
 
   /* ---------- Boot ---------- */
   document.getElementById("purchDate").value = new Date().toISOString().slice(0, 10);
+  renderBrushLabel();
   document.getElementById("keyInput").addEventListener("keydown", (e) => {
     if (e.key === "Enter") submitKey();
   });

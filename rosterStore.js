@@ -27,9 +27,55 @@
  * migration is required to keep an existing week working.
  */
 
-const PRESET_SLOTS = ["AM", "PM", "ALL"];
+const PRESET_SLOTS = ["AM", "PM", "ALL", "NIGHT"];
 /** Custom shift times painted from the dashboard's time editor, e.g. "09:00-17:00". */
 const CUSTOM_SLOT_RE = /^\d{2}:\d{2}-\d{2}:\d{2}$/;
+
+/**
+ * Local clock hours each preset covers, from docs/agencymodelshape.md's three
+ * blocks. NIGHT runs past midnight; a night belongs to the date it starts on.
+ * ALL is the venue's trading day, not 24 hours.
+ */
+const PRESET_HOURS = {
+  AM: [6, 14],
+  PM: [14, 22],
+  NIGHT: [22, 30], // 22:00 to 06:00 the next day
+  ALL: [6, 22],
+};
+
+/**
+ * The real time window a roster slot covers on a given date, so two shifts can
+ * be tested for overlap. Returns Date objects in local time — the roster is
+ * keyed in the venue's own days.
+ * @param {string} slot @param {string} dateIso YYYY-MM-DD
+ * @returns {{startsAt: Date, endsAt: Date}|null}
+ */
+function slotWindow(slot, dateIso) {
+  const canonical = canonicalSlot(slot);
+  if (!canonical) return null;
+  const base = new Date(`${dateIso}T00:00:00`);
+  if (Number.isNaN(base.getTime())) return null;
+
+  let startHours;
+  let endHours;
+  const custom = canonical.match(/^(\d{2}):(\d{2})-(\d{2}):(\d{2})$/);
+  if (custom) {
+    startHours = Number(custom[1]) + Number(custom[2]) / 60;
+    endHours = Number(custom[3]) + Number(custom[4]) / 60;
+    if (endHours <= startHours) endHours += 24; // overnight, e.g. 18:00-02:00
+  } else {
+    [startHours, endHours] = PRESET_HOURS[canonical];
+  }
+
+  const startsAt = new Date(base.getTime() + startHours * 3600 * 1000);
+  const endsAt = new Date(base.getTime() + endHours * 3600 * 1000);
+  return { startsAt, endsAt };
+}
+
+/** Do two [start, end) windows overlap at all? */
+function windowsOverlap(a, b) {
+  return a.startsAt < b.endsAt && b.startsAt < a.endsAt;
+}
 
 /**
  * @typedef {{slot: string, siteId: string|null}} Assignment
@@ -180,6 +226,27 @@ class InMemoryRosterStore {
     const week = await this.getWeek(tenantId, mondayOf(dateIso + "T12:00:00"));
     return assignmentFromWeek(week, dateIso, phone);
   }
+
+  /**
+   * Books one person into one cell. This is how accepting a staffing offer
+   * becomes a real shift: the roster is what the clock-in geofence resolves
+   * against (siteResolver.js), so writing the assignment here is what makes
+   * step 1 and step 2 fit together without a second placement collection.
+   *
+   * Passing null clears the cell.
+   */
+  async setAssignment(tenantId, dateIso, phone, assignment) {
+    const weekStart = mondayOf(dateIso + "T12:00:00");
+    const id = docId(tenantId, weekStart);
+    const existing = this._rosters.get(id) || emptyWeek(tenantId, weekStart);
+    const day = (existing.assignments[dateIso] = existing.assignments[dateIso] || {});
+    const clean = assignment ? normalizeAssignment(assignment) : null;
+    if (clean) day[phone] = clean;
+    else delete day[phone];
+    if (!Object.keys(day).length) delete existing.assignments[dateIso];
+    this._rosters.set(id, existing);
+    return existing;
+  }
 }
 
 class FirestoreRosterStore {
@@ -227,6 +294,32 @@ class FirestoreRosterStore {
     const week = await this.getWeek(tenantId, mondayOf(dateIso + "T12:00:00"));
     return assignmentFromWeek(week, dateIso, phone);
   }
+
+  /**
+   * Books one person into one cell — see the in-memory twin for why this is
+   * the join between steps 1 and 2.
+   *
+   * Transactional whole-document read-modify-write. Two people accepting
+   * different shifts in the same week land in the same document, and a plain
+   * update would drop one of them. Dotted field paths aren't an option here:
+   * the keys are dates and phone numbers, not identifiers.
+   */
+  async setAssignment(tenantId, dateIso, phone, assignment) {
+    const weekStart = mondayOf(dateIso + "T12:00:00");
+    const ref = this.collection.doc(docId(tenantId, weekStart));
+    return this.db.runTransaction(async (tx) => {
+      const doc = await tx.get(ref);
+      const week = doc.exists ? doc.data() : emptyWeek(tenantId, weekStart);
+      week.assignments = week.assignments || {};
+      const day = (week.assignments[dateIso] = week.assignments[dateIso] || {});
+      const clean = assignment ? normalizeAssignment(assignment) : null;
+      if (clean) day[phone] = clean;
+      else delete day[phone];
+      if (!Object.keys(day).length) delete week.assignments[dateIso];
+      tx.set(ref, week);
+      return week;
+    });
+  }
 }
 
 module.exports = {
@@ -236,7 +329,10 @@ module.exports = {
   normalizeAssignmentForWrite,
   normalizeAssignments,
   canonicalSlot,
+  slotWindow,
+  windowsOverlap,
   mondayOf,
   PRESET_SLOTS,
+  PRESET_HOURS,
   CUSTOM_SLOT_RE,
 };

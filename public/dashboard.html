@@ -470,6 +470,19 @@
   </section>
 
   <section>
+    <div class="stamp"><h2>Staffing Requests</h2><div class="spacer"></div>
+      <button class="add-btn" onclick="openAddRequest()">+ Raise request</button></div>
+    <p class="scale-note">The lane is derived from the start time — under 12 hours out is urgent, further out is planned. Nobody picks a priority. Accepting a shift books the person onto the board automatically.</p>
+    <div class="table-wrap">
+      <table class="data">
+        <thead><tr><th>Code</th><th>Site</th><th>Role</th><th>When</th><th>Lane</th><th>Filled</th><th>Wave</th><th>Answers</th><th></th></tr></thead>
+        <tbody id="requestsBody"></tbody>
+      </table>
+    </div>
+    <p class="inline-msg" id="requestsNote"></p>
+  </section>
+
+  <section>
     <div class="stamp"><h2>Service Board</h2><div class="rule"></div></div>
     <div class="board-controls">
       <button class="week-nav" onclick="changeWeek(-1)" aria-label="Previous week">‹</button>
@@ -655,7 +668,28 @@
   </div>
 </div>
 
-<div class="overlay" id="addSiteOverlay">
+<div class="overlay" id="addRequestOverlay">
+  <div class="modal">
+    <h3>Raise a Staffing Request</h3>
+    <div class="field"><label>Site</label><select id="reqSite"></select></div>
+    <div class="field"><label>Role</label><input id="reqRole" type="text" placeholder="e.g. housekeeping" /></div>
+    <div class="field"><label>Date</label><input id="reqDate" type="date" /></div>
+    <div class="field"><label>Start (24h)</label><input id="reqStart" type="time" value="07:00" /></div>
+    <div class="field"><label>End (24h) — overnight is fine</label><input id="reqEnd" type="time" value="15:00" /></div>
+    <div class="field"><label>How many people</label><input id="reqHeadcount" type="number" min="1" max="50" step="1" value="1" /></div>
+    <div class="field"><label>Who asked (phone, optional) — gets the status updates</label>
+      <input id="reqRequestedBy" type="text" placeholder="e.g. 61412345678" />
+    </div>
+    <p class="mono" id="reqLanePreview" style="font-size: 11px; color: var(--dim); margin: 0 0 12px;"></p>
+    <p class="err mono" id="addRequestErr"></p>
+    <div class="modal-actions">
+      <button class="cancel" onclick="closeAddRequest()">Cancel</button>
+      <button class="save" onclick="saveRequest()">Raise it and start searching</button>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="addSiteOverlay"
   <div class="modal">
     <h3 id="addSiteTitle">Add Site</h3>
     <div class="field"><label>Name</label><input id="siteName" type="text" placeholder="e.g. Hilton Sydney" /></div>
@@ -799,6 +833,13 @@
     render(data);
     loadRoster();
     loadPenalties();
+    loadRequests();
+    // A blast on the urgent lane moves in ten-minute waves, so this table has
+    // to keep up on its own — an operator watching a 5:40am gap shouldn't have
+    // to reload the page to see whether it filled.
+    if (!window._requestsPoll) {
+      window._requestsPoll = setInterval(loadRequests, 20000);
+    }
     requestAnimationFrame(() => document.querySelector(".lit-target").classList.add("lit"));
   }
 
@@ -981,6 +1022,160 @@
       sites = body.sites || [];
       renderSites();
     } catch { /* leave the last known list on screen */ }
+  }
+
+  /* ---------- Staffing requests and the blast engine ----------
+     Live data: a blast moves in minutes on the urgent lane, so this section
+     refreshes on its own rather than waiting for a page reload. */
+  let requests = [];
+
+  const LANE_LABEL = { planned: "planned", urgent: "⚡ urgent" };
+  const OUTCOME_LABEL = {
+    open: "searching", filled: "filled", partial: "part-filled",
+    unfilled: "not filled", cancelled: "cancelled",
+  };
+
+  function fmtRequestWhen(request) {
+    const start = new Date(request.startsAt);
+    const end = new Date(request.endsAt);
+    const day = start.toLocaleDateString("en-AU", { weekday: "short", day: "numeric", month: "short" });
+    const t = (d) => d.toLocaleTimeString("en-AU", { hour: "2-digit", minute: "2-digit", hour12: false });
+    return `${day} ${t(start)}–${t(end)}`;
+  }
+
+  function renderRequests() {
+    const live = requests.filter((r) => r.outcome === "open");
+    document.getElementById("requestsBody").innerHTML = requests.map((r) => {
+      const answered = r.offers ? r.offers.accepted + r.offers.declined + r.offers.lost : 0;
+      const dim = r.outcome === "open" ? "" : ' style="opacity:0.6;"';
+      const fillClass = r.filled >= r.headcount ? "pct-ok" : r.outcome === "open" ? "" : "fail";
+      return `
+      <tr${dim}>
+        <td class="mono">${esc(r.ref || "—")}</td>
+        <td>${esc(r.siteName || r.siteId || "—")}</td>
+        <td>${esc(r.role || "any")}</td>
+        <td>${esc(fmtRequestWhen(r))}</td>
+        <td>${esc(LANE_LABEL[r.lane] || r.lane)}</td>
+        <td class="${fillClass}">${r.filled}/${r.headcount}</td>
+        <td>${r.wave ? `wave ${r.wave}` : "—"}</td>
+        <td class="mono">${r.offered || 0} asked · ${answered} answered</td>
+        <td style="text-align:right;">${
+          r.outcome === "open"
+            ? `<button class="del-btn" title="Cancel this request" onclick="cancelRequest('${esc(r.requestId)}')">✕</button>`
+            : `<span class="tag">${esc(OUTCOME_LABEL[r.outcome] || r.outcome)}</span>`
+        }</td>
+      </tr>`;
+    }).join("") ||
+      `<tr><td colspan="9" style="color: var(--dim);">No requests in the last 7 days. Raise one above and the blast starts immediately.</td></tr>`;
+
+    document.getElementById("requestsNote").innerHTML = live.length
+      ? `<span class="mono" style="color:var(--dim);">${live.length} still searching — the engine re-checks every 30 seconds. <a href="#" onclick="runDispatch(event)" style="color:var(--lamp);">Run a pass now</a></span>`
+      : "";
+  }
+
+  async function loadRequests() {
+    try {
+      const res = await fetch(`/api/requests?key=${encodeURIComponent(managerKey)}`);
+      if (!res.ok) return;
+      requests = (await res.json()).requests || [];
+      renderRequests();
+    } catch { /* keep the last known list on screen */ }
+  }
+
+  function openAddRequest() {
+    const sel = document.getElementById("reqSite");
+    fillSiteSelect(sel, defaultSiteForPaint());
+    const today = new Date();
+    document.getElementById("reqDate").value = today.toISOString().slice(0, 10);
+    document.getElementById("reqRole").value = "";
+    document.getElementById("reqHeadcount").value = "1";
+    document.getElementById("reqRequestedBy").value = "";
+    document.getElementById("addRequestErr").textContent = "";
+    updateLanePreview();
+    for (const id of ["reqDate", "reqStart"]) {
+      document.getElementById(id).onchange = updateLanePreview;
+    }
+    document.getElementById("addRequestOverlay").classList.add("open");
+  }
+  function closeAddRequest() {
+    document.getElementById("addRequestOverlay").classList.remove("open");
+  }
+
+  /** Shows the operator which lane they're about to get, and why. */
+  function updateLanePreview() {
+    const startsAt = requestStart();
+    const el = document.getElementById("reqLanePreview");
+    if (!startsAt) { el.textContent = ""; return; }
+    const hours = (startsAt.getTime() - Date.now()) / 3600000;
+    el.textContent = hours < 12
+      ? `Starts in ${hours < 0 ? "the past" : hours.toFixed(1) + "h"} — this will be an URGENT blast (10 min waves).`
+      : `Starts in ${hours.toFixed(1)}h — planned lane (2 hour waves).`;
+  }
+
+  function requestStart() {
+    const date = document.getElementById("reqDate").value;
+    const start = document.getElementById("reqStart").value;
+    if (!date || !start) return null;
+    const d = new Date(`${date}T${start}:00`);
+    return Number.isNaN(d.getTime()) ? null : d;
+  }
+
+  async function saveRequest() {
+    const err = document.getElementById("addRequestErr");
+    const siteId = document.getElementById("reqSite").value;
+    if (!siteId) { err.textContent = "Pick a site — the clock-in geofence comes from it."; return; }
+
+    const startsAt = requestStart();
+    if (!startsAt) { err.textContent = "A date and start time are needed."; return; }
+
+    const endTime = document.getElementById("reqEnd").value;
+    if (!endTime) { err.textContent = "An end time is needed."; return; }
+    const endsAt = new Date(`${document.getElementById("reqDate").value}T${endTime}:00`);
+    // Overnight: an end at or before the start means the next day.
+    if (endsAt <= startsAt) endsAt.setDate(endsAt.getDate() + 1);
+
+    const headcount = Number(document.getElementById("reqHeadcount").value);
+    if (!Number.isInteger(headcount) || headcount < 1 || headcount > 50) {
+      err.textContent = "How many people? A whole number from 1 to 50."; return;
+    }
+
+    try {
+      const res = await fetch(`/api/requests?key=${encodeURIComponent(managerKey)}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          siteId,
+          role: document.getElementById("reqRole").value.trim() || null,
+          startsAt: startsAt.toISOString(),
+          endsAt: endsAt.toISOString(),
+          headcount,
+          requestedBy: document.getElementById("reqRequestedBy").value.trim() || null,
+        }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) { err.textContent = body.error || "Couldn't raise that request."; return; }
+      closeAddRequest();
+      await loadRequests();
+    } catch {
+      err.textContent = "Can't reach the server — try again.";
+    }
+  }
+
+  async function cancelRequest(requestId) {
+    try {
+      await fetch(`/api/requests/${encodeURIComponent(requestId)}/cancel?key=${encodeURIComponent(managerKey)}`, {
+        method: "POST",
+      });
+      await loadRequests();
+    } catch { /* the next refresh will show the real state */ }
+  }
+
+  async function runDispatch(ev) {
+    if (ev) ev.preventDefault();
+    try {
+      await fetch(`/api/dispatch/tick?key=${encodeURIComponent(managerKey)}`, { method: "POST" });
+      await loadRequests();
+    } catch { /* the loop runs on its own regardless */ }
   }
 
   function render(data) {

@@ -136,12 +136,80 @@ roster doesn't come into it.
 ### Agency model
 
 `docs/agencymodelshape.md` sets out a second build order, for running this as a
-labour-hire agency supplying casual staff to many hotels. Its **step 1 —
-sites and a shift-level geofence** is done: a `sites` collection holds one
-geofence per building, and a clock-in is checked against the site on that
-person's rostered shift rather than one radius per tenant. Steps 2 onward
-(requests and the blast engine, weekly availability, chat intake, the
-compliance gate, timesheet sign-off, reporting) are still to come.
+labour-hire agency supplying casual staff to many hotels.
+
+| Step | What | Status |
+|---|---|---|
+| 1 | Sites and a shift-level geofence | ✅ |
+| 2 | Requests, offers and the blast engine | ✅ |
+| 3 | Weekly availability and the free-today pool | ✅ |
+| 4 | Client intake over chat | next |
+| 5 | Compliance gate and hours cap | |
+| 6 | Timesheet sign-off, bill rates, margin | |
+| 7 | Reporting | |
+
+**Step 1** put one geofence per building in a `sites` collection, so a clock-in
+is checked against the site on that person's rostered shift instead of one
+radius per tenant. Add sites from the dashboard's **Sites** section.
+
+**Step 2** added staffing requests and the dispatch engine. Raise a request from
+**Staffing Requests → + Raise request** and the blast starts immediately:
+
+- **The lane is derived from the start time, never declared.** Under twelve
+  hours out is urgent (10-minute waves), further out is planned (2-hour waves).
+  Nobody picks a priority — the API refuses to accept one.
+- Staff answer over WhatsApp with **"yes"** / **"no"**, or **"yes H7K2"** when
+  they have more than one offer open. First come, first served, and the claim is
+  atomic, so two people answering together can never take the same seat.
+- Accepting books the person onto the Service Board at the request's site, which
+  is what makes their clock-in resolve the right building.
+- **Auto-backfill:** no clock-in fifteen minutes after a rostered start fires
+  the urgent blast on its own. The supervisor notices the gap at 7:15; the
+  replacement was accepted at 7:04.
+
+The engine is a tick loop, not a set of timers: all dispatch state lives on the
+request documents, so a redeploy mid-blast resumes instead of abandoning a
+half-filled request. Set `DISPATCH_DISABLED=1` to run an instance without it —
+needed if you ever point a second instance at the same Firestore project, so two
+loops don't both blast the same request.
+
+**Step 3** added weekly availability, so the blast waves now mean what they say.
+Staff answer in three blocks — **AM** 06:00–14:00, **PM** 14:00–22:00,
+**Night** 22:00–06:00 — and the system stores real times, so matching stays
+exact. A night belongs to the date it starts on: "Friday night" is Friday into
+Saturday.
+
+**Three states, not two: available, unavailable, and unknown.** Silence is never
+a yes, and it is never a no either. Sending the weekly ping records that we
+asked without inventing an answer, so somebody who hasn't replied stays unknown
+and simply waits for a later wave.
+
+Nobody in the office types availability. The capture ladder, in order of
+leverage — staff reply on WhatsApp:
+
+| Reply | What it does |
+|---|---|
+| `same` | Repeats last week in one word, or the standing pattern if they've never answered. The highest-leverage rung. |
+| `none` | An explicit "can't work next week" — a real answer, so they stop being offered shifts. |
+| `today` | Joins the free-today pool for about 12 hours. Opt-in, self-expiring, first refusal on today's work. |
+| `mon am pm, fri all` | The shorthand, for the people who like typing. Ranges (`mon-fri am`) work too. |
+| a tap | A signed one-tap link to a 7 × 3 chip grid. No login, no password. Twenty seconds. |
+
+The weekly cycle runs itself: **ask Wednesday, chase Friday, expire with the
+week**, so supply is on the board before the hotels' requests land. Nobody is
+pinged twice and nobody who has answered is chased.
+
+Set **`LINK_SIGNING_SECRET`** (16+ characters) and **`PUBLIC_BASE_URL`** for the
+one-tap links to work. Without them the ping falls back to the shorthand hint
+rather than sending a broken link — the app refuses to issue an unsigned link,
+because that would let anyone submit anyone's availability by editing a URL.
+
+Wave 2 reaches **only** the unknown, not everyone we haven't heard a yes from.
+Somebody who told us they're unavailable has answered, and blasting them again is
+how a casual pool learns to ignore the messages. Only the urgent lane's third
+wave overrides that, and the message says so.
+
+Still to come: no compliance gate until step 5.
 
 ## Security notes (do not skip)
 
@@ -163,5 +231,8 @@ If you ever do work from a machine with Node 18+ installed:
 path above is the recommended one.
 
 `npm test` runs the suite (node's built-in test runner — no dependencies, so it
-works on a fresh clone before `npm install`). It covers site resolution and the
-clock in/out geofence path against the in-memory stores.
+works on a fresh clone before `npm install`). It covers site resolution, the
+clock in/out geofence path, and the dispatch engine — lane derivation, wave
+progression, the first-come race, expiry, and backfill deduping — against the
+in-memory stores. Time is injected rather than slept on, so the whole suite runs
+in under a second.

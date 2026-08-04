@@ -2,6 +2,7 @@
 
 const { sendText, sendLocationRequest } = require("./whatsapp");
 const { checkGeofence } = require("./geofence");
+const { resolveSiteForClockIn, describeResolutionFailure, resolutionLabel } = require("./siteResolver");
 
 /**
  * Handles the clock in/out flow, plus mid-shift breaks. Clock in/out is
@@ -12,6 +13,14 @@ const { checkGeofence } = require("./geofence");
  *
  * Breaks don't need a location share (staff is already on-site) — "break"
  * and "back" act immediately on the text message alone.
+ *
+ * The geofence comes from the **site** on the assigned shift, resolved by
+ * siteResolver.js — not from the tenant. That is the point of build order
+ * step 1 in docs/agencymodelshape.md: an agency sends one staff pool to
+ * fifteen buildings, so a tenant-level radius would flag fourteen of them.
+ * Clock-in resolves the site and stamps it on the shift; clock-out re-checks
+ * against that same stamped site, so the two ends of a shift can never be
+ * measured against different buildings.
  *
  * Every function here takes a `sendOpts` param, forwarded straight to
  * whatsapp.js — {} in a single-venue deployment (falls back to env vars),
@@ -25,52 +34,76 @@ async function requestClockAction(from, action, deps, sendOpts = {}) {
 }
 
 async function handleLocationForClockAction(from, staff, location, action, deps, sendOpts = {}) {
-  const { tenantStore, shiftsStore, pendingActions } = deps;
+  const { shiftsStore, pendingActions } = deps;
+  const reported = { lat: location.latitude, lng: location.longitude };
 
-  const venue = await tenantStore.findById(staff.tenantId);
-  if (!venue || !venue.geofence) {
-    console.error(`[clock] no geofence configured for tenant ${staff.tenantId}`);
-    await sendText(from, "Something's not set up right on our end — please tell your manager: no venue location configured.", sendOpts);
-    pendingActions.clear(from);
-    return;
-  }
-
-  const result = checkGeofence(
-    { lat: location.latitude, lng: location.longitude },
-    venue.geofence
-  );
-
+  // The location we were waiting for has arrived — the pending action is spent
+  // either way, so clear it before any branch can return early.
   pendingActions.clear(from);
 
   if (action === "clock_in") {
-    if (!result.withinRadius) {
-      await recordFlaggedAttempt(shiftsStore, staff, location, result);
-      await sendText(
-        from,
-        `You look to be about ${result.distanceMeters}m from the venue, which is outside the clock-in range. ` +
-          `I've flagged this for your manager to review — they can approve it if needed.`,
-        sendOpts
-      );
-      return;
-    }
+    await clockIn(from, staff, reported, deps, sendOpts);
+    return;
+  }
+  await clockOut(from, staff, reported, deps, sendOpts);
+}
 
-    const { shiftId } = await shiftsStore.openShift({
-      tenantId: staff.tenantId,
-      staffPhone: from,
-      department: staff.department || null,
-      clockIn: {
-        time: new Date().toISOString(),
-        lat: location.latitude,
-        lng: location.longitude,
-        withinRadius: true,
-        distanceMeters: result.distanceMeters,
-      },
-    });
-    await sendText(from, `Clocked in, ${staff.name} — have a good shift! (${shiftId})`, sendOpts);
+async function clockIn(from, staff, reported, deps, sendOpts) {
+  const { shiftsStore } = deps;
+
+  const resolution = await resolveSiteForClockIn({ staff: { ...staff, phone: from }, deps });
+  if (!resolution.geofence) {
+    console.error(
+      `[clock] cannot resolve a site for ${from} @ ${staff.tenantId}: ${resolution.reason}`
+    );
+    await sendText(from, describeResolutionFailure(resolution), sendOpts);
     return;
   }
 
-  // action === "clock_out"
+  const result = checkGeofence(reported, resolution.geofence);
+  const site = resolution.site;
+  const siteLabel = site ? site.name : "the venue";
+  console.log(
+    `[clock] in ${from} site=${resolutionLabel(resolution)} via=${resolution.source} ` +
+      `dist=${result.distanceMeters}m within=${result.withinRadius}`
+  );
+
+  if (!result.withinRadius) {
+    await recordFlaggedAttempt(shiftsStore, staff, from, reported, result, resolution);
+    await sendText(
+      from,
+      `You look to be about ${result.distanceMeters}m from ${siteLabel}, which is outside the clock-in range. ` +
+        `I've flagged this for your manager to review — they can approve it if needed.`,
+      sendOpts
+    );
+    return;
+  }
+
+  const { shiftId } = await shiftsStore.openShift({
+    tenantId: staff.tenantId,
+    staffPhone: from,
+    department: staff.department || null,
+    siteId: site ? site.siteId : null,
+    siteName: site ? site.name : null,
+    clockIn: {
+      time: new Date().toISOString(),
+      lat: reported.lat,
+      lng: reported.lng,
+      withinRadius: true,
+      distanceMeters: result.distanceMeters,
+      siteSource: resolution.source,
+    },
+  });
+  await sendText(
+    from,
+    `Clocked in at ${siteLabel}, ${staff.name} — have a good shift! (${shiftId})`,
+    sendOpts
+  );
+}
+
+async function clockOut(from, staff, reported, deps, sendOpts) {
+  const { shiftsStore } = deps;
+
   const openShift = await shiftsStore.findOpenShift(from);
   if (!openShift) {
     await sendText(from, 'I don\'t see an open shift for you to clock out of. Message "in" if you haven\'t clocked in yet.', sendOpts);
@@ -82,13 +115,36 @@ async function handleLocationForClockAction(from, staff, location, action, deps,
     return;
   }
 
-  await shiftsStore.closeShift(openShift.shiftId, {
-    time: new Date().toISOString(),
-    lat: location.latitude,
-    lng: location.longitude,
-    withinRadius: result.withinRadius,
-    distanceMeters: result.distanceMeters,
+  // Measured against the site stamped on this shift at clock-in, so both ends
+  // of a shift are always compared to the same building.
+  const resolution = await resolveSiteForClockIn({
+    staff: { ...staff, phone: from },
+    siteId: openShift.siteId || null,
+    deps,
   });
+
+  // A clock-out is never refused. Someone finishing a shift has already worked
+  // the hours; losing them because a site was deleted mid-shift would be a
+  // worse failure than an unverified location. Record what we know instead.
+  const clockOutRecord = {
+    time: new Date().toISOString(),
+    lat: reported.lat,
+    lng: reported.lng,
+  };
+  if (resolution.geofence) {
+    const result = checkGeofence(reported, resolution.geofence);
+    clockOutRecord.withinRadius = result.withinRadius;
+    clockOutRecord.distanceMeters = result.distanceMeters;
+  } else {
+    console.warn(
+      `[clock] out ${from} shift=${openShift.shiftId} unverified location: ${resolution.reason}`
+    );
+    clockOutRecord.withinRadius = null;
+    clockOutRecord.distanceMeters = null;
+    clockOutRecord.geofenceUnavailable = resolution.reason;
+  }
+
+  await shiftsStore.closeShift(openShift.shiftId, clockOutRecord);
 
   const workedMs = shiftDurationMinusBreaks(openShift, Date.now());
   const hours = (workedMs / 1000 / 60 / 60).toFixed(1);
@@ -150,18 +206,27 @@ function shiftDurationMinusBreaks(shift, nowMs) {
   return Math.max(0, totalMs - breakMs);
 }
 
-async function recordFlaggedAttempt(shiftsStore, staff, location, result) {
+/**
+ * An out-of-radius clock-in still becomes a shift, flagged for review. It
+ * carries the site it was measured against — without that, a manager looking
+ * at "142m away" has no way to know which building the 142m was from.
+ */
+async function recordFlaggedAttempt(shiftsStore, staff, from, reported, result, resolution) {
   try {
+    const site = resolution.site;
     await shiftsStore.openShift({
       tenantId: staff.tenantId,
-      staffPhone: staff.phone,
+      staffPhone: from,
       department: staff.department || null,
+      siteId: site ? site.siteId : null,
+      siteName: site ? site.name : null,
       clockIn: {
         time: new Date().toISOString(),
-        lat: location.latitude,
-        lng: location.longitude,
+        lat: reported.lat,
+        lng: reported.lng,
         withinRadius: false,
         distanceMeters: result.distanceMeters,
+        siteSource: resolution.source,
         flaggedForReview: true,
       },
     });

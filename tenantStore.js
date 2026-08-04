@@ -1,15 +1,23 @@
 "use strict";
 
 /**
- * Tenant/venue lookup — geofence and fixed-cost config live here.
+ * Tenant lookup — WhatsApp credentials and cost config live here.
  * Data model (backend-build-scope.md):
- *   tenants/{tenantId} = { name, plan, geofence: {lat,lng,radiusMeters},
- *                          fixedCosts: [...], phoneNumberId?, whatsappToken? }
+ *   tenants/{tenantId} = { name, plan, fixedCosts: [...], penaltyRules?,
+ *                          phoneNumberId?, whatsappToken?,
+ *                          geofence?: {lat,lng,radiusMeters}  // LEGACY }
  *
  * phoneNumberId/whatsappToken are only present once a venue has its own
  * dedicated WhatsApp number (multi-tenant setups) — a single-venue
  * deployment can leave these unset and everything falls back to the
  * WHATSAPP_PHONE_NUMBER_ID / WHATSAPP_TOKEN env vars, unchanged.
+ *
+ * `geofence` is LEGACY and must not be read by new code. Locations belong to
+ * sites now (siteStore.js), because a tenant is an agency that sends staff to
+ * many buildings, not one building — docs/agencymodelshape.md, build order
+ * step 1. siteResolver.js still falls back to this field when a tenant has no
+ * sites at all, purely so deployments that predate `sites` keep clocking
+ * people in; create a site and the fallback stops being consulted.
  */
 
 class InMemoryTenantStore {
@@ -17,10 +25,11 @@ class InMemoryTenantStore {
     /** @type {Map<string, object>} */
     this._tenants = new Map();
 
+    // No `geofence` here on purpose — the demo venue's location lives on the
+    // "demo-venue-main" site instead (siteStore.js).
     this.upsert("demo-venue", {
       name: "Demo Venue",
       plan: "free",
-      geofence: { lat: -33.8568, lng: 151.2153, radiusMeters: 75 }, // Sydney Opera House, as a placeholder
       fixedCosts: [],
     });
   }

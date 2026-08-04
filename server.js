@@ -15,15 +15,17 @@ const { SLOT_LABELS } = require("./availabilityHandler");
 const { handleIncoming } = require("./router");
 const { buildStores } = require("./stores");
 const { InMemoryPendingActions } = require("./pendingActions");
+const { normalizeAssignment, normalizeAssignments } = require("./rosterStore");
+const { normalizeGeofence, slugifySiteId, MIN_RADIUS_METERS, MAX_RADIUS_METERS } = require("./siteStore");
 
 // The single venue this build supports so far (see decisions log — multi-
 // tenant support is a later step). The dashboard is scoped to this tenant.
 const DASHBOARD_TENANT_ID = "demo-venue";
 
 const app = express();
-const { staffStore, tenantStore, shiftsStore, rosterStore, purchasesStore, backend } = buildStores();
+const { staffStore, tenantStore, siteStore, shiftsStore, rosterStore, purchasesStore, backend } = buildStores();
 const pendingActions = new InMemoryPendingActions();
-const deps = { staffStore, tenantStore, shiftsStore, rosterStore, purchasesStore, pendingActions };
+const deps = { staffStore, tenantStore, siteStore, shiftsStore, rosterStore, purchasesStore, pendingActions };
 
 console.log(`[startup] data backend: ${backend}`);
 
@@ -163,11 +165,12 @@ app.get("/api/dashboard", requireDashboardKey, async (_req, res) => {
     // The dashboard only renders open shifts + a recent window (history table
     // caps at 25, hours/variance use 7 days), so 14 days covers everything.
     const since = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString();
-    const [staff, openShifts, recentShifts, venue] = await Promise.all([
+    const [staff, openShifts, recentShifts, venue, sites] = await Promise.all([
       staffStore.listByTenant(DASHBOARD_TENANT_ID),
       shiftsStore.listOpenByTenant(DASHBOARD_TENANT_ID),
       shiftsStore.listRecentByTenant(DASHBOARD_TENANT_ID, since),
       tenantStore.findById(DASHBOARD_TENANT_ID),
+      siteStore.listByTenant(DASHBOARD_TENANT_ID, { includeInactive: true }),
     ]);
     const seen = new Set();
     const shifts = [...openShifts, ...recentShifts].filter((s) => {
@@ -175,7 +178,7 @@ app.get("/api/dashboard", requireDashboardKey, async (_req, res) => {
       seen.add(s.shiftId);
       return true;
     });
-    res.json({ staff, shifts, venue });
+    res.json({ staff, shifts, venue, sites });
   } catch (err) {
     console.error("[dashboard] failed to load data:", err);
     res.status(500).json({ error: "Failed to load dashboard data." });
@@ -233,9 +236,123 @@ app.post("/api/staff", requireDashboardKey, async (req, res) => {
 
 
 /**
+ * Sites — the buildings staff get sent to, and where the clock-in geofence
+ * now lives (docs/agencymodelshape.md, build order step 1).
+ *
+ * GET /api/sites — every site for this tenant, inactive ones included so the
+ * dashboard can show them greyed rather than silently losing them. Also
+ * reports whether the tenant is still leaning on its pre-sites `geofence`
+ * field, which is the one thing an operator needs prompting to fix.
+ */
+app.get("/api/sites", requireDashboardKey, async (_req, res) => {
+  try {
+    const [sites, venue] = await Promise.all([
+      siteStore.listByTenant(DASHBOARD_TENANT_ID, { includeInactive: true }),
+      tenantStore.findById(DASHBOARD_TENANT_ID),
+    ]);
+    res.json({
+      sites,
+      // True while clock-ins are still being checked against the tenant-level
+      // radius because no site exists yet — see siteResolver.js step 4.
+      usingLegacyTenantGeofence: sites.length === 0 && Boolean(venue && venue.geofence),
+      legacyTenantGeofence: (venue && venue.geofence) || null,
+    });
+  } catch (err) {
+    console.error("[sites] failed to list:", err);
+    res.status(500).json({ error: "Failed to load sites." });
+  }
+});
+
+/**
+ * POST /api/sites — create or update a site.
+ * Body: { siteId?, name, address?, geofence: {lat, lng, radiusMeters},
+ *         requesters?: [{phone, name}], billRates?: {[role]: number} }
+ *
+ * `siteId` is a slug derived from the name when not supplied, so it reads
+ * usefully on a shift record. It is never regenerated on update — renaming
+ * "Hilton Sydney" must not orphan the shifts that reference hilton-sydney.
+ */
+app.post("/api/sites", requireDashboardKey, async (req, res) => {
+  try {
+    const body = req.body || {};
+    const name = String(body.name || "").trim();
+    if (!name) return res.status(400).json({ error: "name is required." });
+
+    const siteId = body.siteId ? slugifySiteId(body.siteId) : slugifySiteId(name);
+    if (!siteId) {
+      return res.status(400).json({ error: "name must contain at least one letter or number." });
+    }
+
+    // A site without coordinates can't validate a clock-in, so refuse the
+    // half-configured version rather than storing a site that silently flags
+    // everyone sent to it.
+    const geofence = normalizeGeofence(body.geofence);
+    if (!geofence) {
+      return res.status(400).json({
+        error:
+          "geofence must be {lat, lng, radiusMeters} with a valid latitude and longitude. " +
+          `radiusMeters is clamped to ${MIN_RADIUS_METERS}-${MAX_RADIUS_METERS}m.`,
+      });
+    }
+
+    const requesters = Array.isArray(body.requesters)
+      ? body.requesters
+          .map((r) => ({
+            phone: String((r && r.phone) || "").replace(/[^\d]/g, ""),
+            name: r && r.name ? String(r.name).trim() : null,
+          }))
+          .filter((r) => r.phone)
+      : undefined;
+
+    let billRates;
+    if (body.billRates && typeof body.billRates === "object") {
+      billRates = {};
+      for (const [role, rate] of Object.entries(body.billRates)) {
+        const n = Number(rate);
+        if (isFinite(n) && n >= 0) billRates[String(role).trim()] = n;
+      }
+    }
+
+    const site = await siteStore.upsert(siteId, {
+      tenantId: DASHBOARD_TENANT_ID,
+      name,
+      address: body.address,
+      geofence,
+      ...(requesters ? { requesters } : {}),
+      ...(billRates ? { billRates } : {}),
+      active: body.active !== false,
+    });
+    res.json({ ok: true, site });
+  } catch (err) {
+    console.error("[sites] failed to save:", err);
+    res.status(500).json({ error: "Failed to save site." });
+  }
+});
+
+/**
+ * POST /api/sites/:id/active — deactivate or reactivate a site.
+ * Body: { active: boolean }. Sites are never hard-deleted: shifts reference
+ * them by id, and an invoice from three months ago still has to name the
+ * building it was worked at.
+ */
+app.post("/api/sites/:id/active", requireDashboardKey, async (req, res) => {
+  try {
+    const site = await siteStore.setActive(req.params.id, Boolean(req.body?.active));
+    res.json({ ok: true, site });
+  } catch (err) {
+    if (err.message === "SITE_NOT_FOUND") {
+      return res.status(404).json({ error: "No site with that id." });
+    }
+    console.error("[sites] failed to change active state:", err);
+    res.status(500).json({ error: "Failed to update site." });
+  }
+});
+
+/**
  * GET /api/roster?week=YYYY-MM-DD — the roster grid data for one week:
  * the week's assignments plus each staff member's availability, so the
- * dashboard can tint cells and warn on conflicts.
+ * dashboard can tint cells and warn on conflicts. Sites come along too —
+ * an assignment names the building, so the grid needs the picker options.
  */
 app.get("/api/roster", requireDashboardKey, async (req, res) => {
   try {
@@ -243,11 +360,14 @@ app.get("/api/roster", requireDashboardKey, async (req, res) => {
     if (!/^\d{4}-\d{2}-\d{2}$/.test(weekStart)) {
       return res.status(400).json({ error: "week must be YYYY-MM-DD (a Monday)." });
     }
-    const [roster, staff] = await Promise.all([
+    const [roster, staff, sites] = await Promise.all([
       rosterStore.getWeek(DASHBOARD_TENANT_ID, weekStart),
       staffStore.listByTenant(DASHBOARD_TENANT_ID),
+      // Inactive included so this payload is interchangeable with
+      // /api/dashboard's — the client filters for the pickers itself.
+      siteStore.listByTenant(DASHBOARD_TENANT_ID, { includeInactive: true }),
     ]);
-    res.json({ roster, staff });
+    res.json({ roster, staff, sites });
   } catch (err) {
     console.error("[roster] failed to load week:", err);
     res.status(500).json({ error: "Failed to load roster." });
@@ -256,7 +376,13 @@ app.get("/api/roster", requireDashboardKey, async (req, res) => {
 
 /**
  * POST /api/roster — auto-save the whole week's assignments on every cell
- * click. Body: { week: "YYYY-MM-DD", assignments: {date: {phone: slot}} }.
+ * click. Body: { week: "YYYY-MM-DD",
+ *                assignments: {date: {phone: {slot, siteId} | "AM"}} }.
+ *
+ * Cells are normalized on the way in, and a siteId the tenant doesn't own is
+ * stripped rather than stored: a dangling site reference on an assignment
+ * becomes a geofence that can never match, which flags a staff member for
+ * being exactly where they were told to be.
  */
 app.post("/api/roster", requireDashboardKey, async (req, res) => {
   try {
@@ -270,7 +396,10 @@ app.post("/api/roster", requireDashboardKey, async (req, res) => {
       openingStock: numOrNull(req.body.openingStock),
       closingStock: numOrNull(req.body.closingStock),
     };
-    const saved = await rosterStore.saveWeek(DASHBOARD_TENANT_ID, week, assignments || {}, extras);
+    const sites = await siteStore.listByTenant(DASHBOARD_TENANT_ID, { includeInactive: true });
+    const knownSiteIds = new Set(sites.map((s) => s.siteId));
+    const clean = normalizeAssignments(assignments, (siteId) => knownSiteIds.has(siteId));
+    const saved = await rosterStore.saveWeek(DASHBOARD_TENANT_ID, week, clean, extras);
     res.json({ ok: true, roster: saved });
   } catch (err) {
     console.error("[roster] failed to save week:", err);
@@ -303,12 +432,18 @@ app.post("/api/roster/publish", requireDashboardKey, async (req, res) => {
       ? { phoneNumberId: venue.phoneNumberId, token: venue.whatsappToken || undefined }
       : {};
 
+    // Site names for the message body — a casual working three hotels this
+    // week needs to be told which one, not just "Tue — AM".
+    const sites = await siteStore.listByTenant(DASHBOARD_TENANT_ID, { includeInactive: true });
+    const siteNames = new Map(sites.map((s) => [s.siteId, s.name]));
+
     // Collect each person's assigned days across the week.
     const perStaff = {};
     for (const [date, dayAssignments] of Object.entries(roster.assignments || {})) {
-      for (const [phone, slot] of Object.entries(dayAssignments)) {
-        if (!slot) continue;
-        (perStaff[phone] = perStaff[phone] || []).push({ date, slot });
+      for (const [phone, raw] of Object.entries(dayAssignments)) {
+        const assignment = normalizeAssignment(raw);
+        if (!assignment) continue;
+        (perStaff[phone] = perStaff[phone] || []).push({ date, ...assignment });
       }
     }
 
@@ -322,7 +457,8 @@ app.post("/api/roster/publish", requireDashboardKey, async (req, res) => {
         const label = new Date(e.date + "T00:00:00").toLocaleDateString("en-AU", {
           weekday: "short", day: "numeric", month: "short",
         });
-        return `${label} — ${SLOT_LABELS[e.slot] || e.slot}`;
+        const site = e.siteId ? siteNames.get(e.siteId) : null;
+        return `${label} — ${SLOT_LABELS[e.slot] || e.slot}${site ? ` @ ${site}` : ""}`;
       });
       const heading = wasPublished ? "Your roster has been updated" : "Your roster is out";
       const body = `${heading}, ${person ? person.name : ""}:\n${lines.join("\n")}`;

@@ -221,6 +221,20 @@
   .cell.slot-ALL { background: var(--herb-deep); color: #E2F0E1; }
   .cell.conflict { box-shadow: inset 0 0 0 2px var(--lamp); }
   .cell.slot-CUSTOM { background: #1E4B4B; color: #D2EFEF; font-size: 10px; letter-spacing: 0; }
+  /* Which building the shift is at. Only rendered when there's more than one
+     site, so a single-venue board looks exactly as it did before. */
+  .cell .cell-site { display: block; font-size: 9px; font-weight: 500; opacity: 0.78; letter-spacing: 0.02em; }
+  .cell.no-site { box-shadow: inset 0 0 0 2px #7A3B16; }
+  .site-brush { display: inline-flex; align-items: center; gap: 7px; }
+  .site-brush label {
+    font-family: 'IBM Plex Mono', monospace; font-size: 11px; letter-spacing: 0.08em;
+    text-transform: uppercase; color: var(--dim);
+  }
+  .site-brush select {
+    padding: 8px 10px; border-radius: 6px; background: var(--panel);
+    border: 1px solid var(--seam); color: var(--text);
+    font-family: 'IBM Plex Mono', monospace; font-size: 12px;
+  }
   .brush-btn {
     padding: 8px 14px; border-radius: 6px; cursor: pointer;
     background: var(--panel); border: 1px solid var(--lamp-deep); color: var(--lamp);
@@ -444,12 +458,28 @@
   </section>
 
   <section>
+    <div class="stamp"><h2>Sites</h2><div class="spacer"></div><button class="add-btn" onclick="openAddSite()">+ Add site</button></div>
+    <p class="scale-note">Every clock-in is checked against the site on that person's rostered shift — not against one venue-wide radius. Add a site per building you send people to.</p>
+    <p class="inline-msg" id="siteWarning"></p>
+    <div class="table-wrap">
+      <table class="data">
+        <thead><tr><th>Site</th><th>Address</th><th>Location</th><th>Radius</th><th></th></tr></thead>
+        <tbody id="sitesBody"></tbody>
+      </table>
+    </div>
+  </section>
+
+  <section>
     <div class="stamp"><h2>Service Board</h2><div class="rule"></div></div>
     <div class="board-controls">
       <button class="week-nav" onclick="changeWeek(-1)" aria-label="Previous week">‹</button>
       <span class="week-label" id="weekLabel"></span>
       <button class="week-nav" onclick="changeWeek(1)" aria-label="Next week">›</button>
       <button class="brush-btn" id="brushBtn" onclick="openBrushEditor()" title="The shift time a click paints onto cells">🖌 <span id="brushLabel">All day</span></button>
+      <span class="site-brush" id="siteBrushWrap" style="display:none;">
+        <label for="siteBrush">Site</label>
+        <select id="siteBrush" onchange="siteBrushChanged()" title="The site a click paints onto cells — this is what the clock-in geofence checks against"></select>
+      </span>
       <button class="publish-btn" id="publishBtn" onclick="publishRoster()">Send roster to WhatsApp</button>
     </div>
     <div class="board-wrap">
@@ -466,7 +496,7 @@
       <span><span class="chip" style="background:#2E1B1A;"></span>Unavailable</span>
       <span><span class="chip" style="box-shadow: inset 0 0 0 2px var(--lamp); background:transparent;"></span>Outside availability</span>
       <span><span class="chip" style="background:#1E4B4B;"></span>Custom times</span>
-      <span style="color: var(--dim);">Click paints the brush time · click again clears · double-click edits one cell</span>
+      <span style="color: var(--dim);">Click paints the brush time and site · click again clears · double-click edits one cell</span>
     </div>
     <p class="scale-note" id="boardScaleNote"></p>
     <div class="cost-line">
@@ -585,7 +615,7 @@
     <div class="stamp"><h2>Closed Dockets</h2><div class="rule"></div></div>
     <div class="table-wrap">
       <table class="data">
-        <thead><tr><th>Crew</th><th>Date</th><th>In</th><th>Out</th><th>Shift</th><th></th></tr></thead>
+        <thead><tr><th>Crew</th><th>Site</th><th>Date</th><th>In</th><th>Out</th><th>Shift</th><th></th></tr></thead>
         <tbody id="historyBody"></tbody>
       </table>
     </div>
@@ -596,6 +626,9 @@
   <div class="modal">
     <h3 id="timeTitle">Shift Times</h3>
     <div class="quick-chips" id="quickChips"></div>
+    <div class="field" id="timeSiteField" style="display:none;"><label>Site — what the clock-in geofence checks against</label>
+      <select id="timeSite"></select>
+    </div>
     <div class="field"><label>Start (24h)</label><input id="timeStart" type="time" /></div>
     <div class="field"><label>End (24h) — overnight is fine (e.g. 18:00 → 02:00)</label><input id="timeEnd" type="time" /></div>
     <p class="err mono" id="timeErr"></p>
@@ -622,7 +655,25 @@
   </div>
 </div>
 
-<div class="overlay" id="addStaffOverlay">
+<div class="overlay" id="addSiteOverlay">
+  <div class="modal">
+    <h3 id="addSiteTitle">Add Site</h3>
+    <div class="field"><label>Name</label><input id="siteName" type="text" placeholder="e.g. Hilton Sydney" /></div>
+    <div class="field"><label>Address (optional)</label><input id="siteAddress" type="text" placeholder="e.g. 488 George St, Sydney" /></div>
+    <div class="field"><label>Latitude</label><input id="siteLat" type="number" step="0.000001" placeholder="e.g. -33.8710" /></div>
+    <div class="field"><label>Longitude</label><input id="siteLng" type="number" step="0.000001" placeholder="e.g. 151.2073" /></div>
+    <div class="field"><label>Clock-in radius (metres) — 50–100m absorbs normal GPS drift</label>
+      <input id="siteRadius" type="number" min="20" max="2000" step="5" placeholder="75" />
+    </div>
+    <p class="err mono" id="addSiteErr"></p>
+    <div class="modal-actions">
+      <button class="cancel" onclick="closeAddSite()">Cancel</button>
+      <button class="save" onclick="saveSite()">Save site</button>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="addStaffOverlay"
   <div class="modal">
     <h3>Add Crew</h3>
     <div class="field"><label>Name</label><input id="newName" type="text" placeholder="e.g. Kenji" /></div>
@@ -751,13 +802,196 @@
     requestAnimationFrame(() => document.querySelector(".lit-target").classList.add("lit"));
   }
 
+  /* ---------- Sites: where the clock-in geofence lives ----------
+     A roster cell holds {slot, siteId}; older weeks hold a bare slot string.
+     slotOf/siteIdOf read both, so nothing has to be migrated. */
+  let sites = [];
+  const SITE_BRUSH_KEY = "hos_site_brush";
+  let siteBrush = localStorage.getItem(SITE_BRUSH_KEY) || "";
+  let editingSiteId = null;
+
+  function slotOf(cell) {
+    if (!cell) return "";
+    return typeof cell === "string" ? cell : (cell.slot || "");
+  }
+  function siteIdOf(cell) {
+    return cell && typeof cell === "object" ? (cell.siteId || "") : "";
+  }
+  function activeSites() {
+    return sites.filter((s) => s.active !== false);
+  }
+  function siteName(siteId) {
+    const site = sites.find((s) => s.siteId === siteId);
+    return site ? site.name : "";
+  }
+  /** Only worth showing site labels on the board once there's more than one. */
+  function siteChoiceMatters() {
+    return activeSites().length > 1;
+  }
+  /**
+   * A shift ticket's second line: the person's section, and the building when
+   * there's more than one to tell apart. One-site venues read as before.
+   */
+  function shiftSubtitle(staff, shift) {
+    const dept = staffDept(staff, shift.staffPhone);
+    if (!siteChoiceMatters() || !shift.siteName) return dept;
+    return dept && dept !== "—" ? `${dept} · ${shift.siteName}` : shift.siteName;
+  }
+
+  function renderSites() {
+    document.getElementById("sitesBody").innerHTML = sites.map((s) => {
+      const g = s.geofence;
+      return `
+      <tr${s.active === false ? ' style="opacity:0.5;"' : ""}>
+        <td>${esc(s.name)}${s.active === false ? " <span class=\"tag\">INACTIVE</span>" : ""}</td>
+        <td>${esc(s.address || "—")}</td>
+        <td class="mono">${g ? `${g.lat.toFixed(5)}, ${g.lng.toFixed(5)}` : "—"}</td>
+        <td>${g ? `${g.radiusMeters}m` : "—"}</td>
+        <td style="text-align:right;">
+          <button class="del-btn" title="Edit ${esc(s.name)}" onclick="openEditSite('${esc(s.siteId)}')">✎</button>
+          <button class="del-btn" title="${s.active === false ? "Reactivate" : "Deactivate"} ${esc(s.name)}" onclick="toggleSiteActive('${esc(s.siteId)}', ${s.active === false})">${s.active === false ? "↺" : "⏸"}</button>
+        </td>
+      </tr>`;
+    }).join("") ||
+      `<tr><td colspan="5" style="color: var(--dim);">No sites yet — add the building you send people to, or clock-ins can't be checked against anything.</td></tr>`;
+
+    renderSiteBrush();
+    renderSiteWarning();
+  }
+
+  function renderSiteWarning() {
+    const el = document.getElementById("siteWarning");
+    if (sites.length === 0) {
+      el.innerHTML = window._venue && window._venue.geofence
+        ? `<span class="fail">No sites yet — clock-ins are still falling back to the old venue-wide radius. Add a site to fix it.</span>`
+        : `<span class="fail">No sites and no venue location — nobody can clock in until you add a site.</span>`;
+      return;
+    }
+    const withGeofence = activeSites().filter((s) => s.geofence);
+    if (withGeofence.length === 0) {
+      el.innerHTML = `<span class="fail">No active site has a location set — nobody can clock in.</span>`;
+      return;
+    }
+    el.textContent = "";
+  }
+
+  function renderSiteBrush() {
+    const wrap = document.getElementById("siteBrushWrap");
+    const sel = document.getElementById("siteBrush");
+    const options = activeSites();
+    wrap.style.display = siteChoiceMatters() ? "inline-flex" : "none";
+    if (!options.some((s) => s.siteId === siteBrush)) {
+      siteBrush = options.length === 1 ? options[0].siteId : "";
+      localStorage.setItem(SITE_BRUSH_KEY, siteBrush);
+    }
+    sel.innerHTML =
+      `<option value="">— pick a site —</option>` +
+      options.map((s) => `<option value="${esc(s.siteId)}"${s.siteId === siteBrush ? " selected" : ""}>${esc(s.name)}</option>`).join("");
+  }
+  function siteBrushChanged() {
+    siteBrush = document.getElementById("siteBrush").value;
+    localStorage.setItem(SITE_BRUSH_KEY, siteBrush);
+  }
+
+  function fillSiteSelect(sel, selectedId) {
+    const options = activeSites();
+    sel.innerHTML =
+      `<option value="">— no site —</option>` +
+      options.map((s) => `<option value="${esc(s.siteId)}"${s.siteId === selectedId ? " selected" : ""}>${esc(s.name)}</option>`).join("");
+  }
+
+  function openAddSite() {
+    editingSiteId = null;
+    document.getElementById("addSiteTitle").textContent = "Add Site";
+    document.getElementById("siteName").value = "";
+    document.getElementById("siteAddress").value = "";
+    document.getElementById("siteLat").value = "";
+    document.getElementById("siteLng").value = "";
+    document.getElementById("siteRadius").value = "75";
+    document.getElementById("addSiteErr").textContent = "";
+    document.getElementById("addSiteOverlay").classList.add("open");
+  }
+  function openEditSite(siteId) {
+    const site = sites.find((s) => s.siteId === siteId);
+    if (!site) return;
+    editingSiteId = siteId;
+    document.getElementById("addSiteTitle").textContent = `Edit ${site.name}`;
+    document.getElementById("siteName").value = site.name || "";
+    document.getElementById("siteAddress").value = site.address || "";
+    document.getElementById("siteLat").value = site.geofence ? site.geofence.lat : "";
+    document.getElementById("siteLng").value = site.geofence ? site.geofence.lng : "";
+    document.getElementById("siteRadius").value = site.geofence ? site.geofence.radiusMeters : 75;
+    document.getElementById("addSiteErr").textContent = "";
+    document.getElementById("addSiteOverlay").classList.add("open");
+  }
+  function closeAddSite() {
+    document.getElementById("addSiteOverlay").classList.remove("open");
+    editingSiteId = null;
+  }
+  async function saveSite() {
+    const err = document.getElementById("addSiteErr");
+    const name = document.getElementById("siteName").value.trim();
+    const lat = Number(document.getElementById("siteLat").value);
+    const lng = Number(document.getElementById("siteLng").value);
+    const radiusMeters = Number(document.getElementById("siteRadius").value);
+    if (!name) { err.textContent = "A name is needed."; return; }
+    if (!isFinite(lat) || lat < -90 || lat > 90) { err.textContent = "Latitude must be between -90 and 90."; return; }
+    if (!isFinite(lng) || lng < -180 || lng > 180) { err.textContent = "Longitude must be between -180 and 180."; return; }
+    if (!isFinite(radiusMeters) || radiusMeters < 20 || radiusMeters > 2000) {
+      err.textContent = "Radius must be between 20 and 2000 metres."; return;
+    }
+    try {
+      const res = await fetch(`/api/sites?key=${encodeURIComponent(managerKey)}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          // Editing keeps the original id — renaming a site must not orphan
+          // the shifts and assignments that already reference it.
+          ...(editingSiteId ? { siteId: editingSiteId } : {}),
+          name,
+          address: document.getElementById("siteAddress").value.trim() || null,
+          geofence: { lat, lng, radiusMeters },
+        }),
+      });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) { err.textContent = body.error || "Couldn't save that site."; return; }
+      closeAddSite();
+      await loadSites();
+      if (rosterData) renderRoster();
+    } catch {
+      err.textContent = "Can't reach the server — try again.";
+    }
+  }
+  async function toggleSiteActive(siteId, active) {
+    try {
+      await fetch(`/api/sites/${encodeURIComponent(siteId)}/active?key=${encodeURIComponent(managerKey)}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ active }),
+      });
+      await loadSites();
+      if (rosterData) renderRoster();
+    } catch { /* the next load will show the real state */ }
+  }
+  async function loadSites() {
+    try {
+      const res = await fetch(`/api/sites?key=${encodeURIComponent(managerKey)}`);
+      if (!res.ok) return;
+      const body = await res.json();
+      sites = body.sites || [];
+      renderSites();
+    } catch { /* leave the last known list on screen */ }
+  }
+
   function render(data) {
     const { staff, shifts, venue } = data;
     window._core = { staff, shifts };
     window._venue = venue;
+    if (Array.isArray(data.sites)) sites = data.sites;
     renderSectionChips(staff);
     document.getElementById("venueLine").textContent =
       `${venue?.name || "Venue"} · ${new Date().toLocaleDateString("en-AU", { weekday: "long", day: "numeric", month: "short" })}`;
+    renderSites();
 
     const bySection = (s) => {
       const person = staff.find((x) => x.phone === s.staffPhone);
@@ -790,7 +1024,7 @@
         return `
           <div class="compact-row">
             <span class="c-name">${esc(staffName(staff, s.staffPhone))}</span>
-            <span class="c-dept">${esc(staffDept(staff, s.staffPhone))}</span>
+            <span class="c-dept">${esc(shiftSubtitle(staff, s))}</span>
             <span class="c-time">⏱ ${fmtDuration(elapsed)}</span>
             <button class="del-btn" title="Clock out now" onclick="forceClose('${esc(s.shiftId)}', this)">⏻</button>
           </div>`;
@@ -802,7 +1036,7 @@
           <div class="ticket">
             <span class="clip"></span>
             <div class="name">${esc(staffName(staff, s.staffPhone))}</div>
-            <div class="dept">${esc(staffDept(staff, s.staffPhone))}</div>
+            <div class="dept">${esc(shiftSubtitle(staff, s))}</div>
             <div class="elapsed">⏱ ${fmtDuration(elapsed)}</div>
             <div class="since">on since ${fmtClock(s.clockIn.time)}</div>
             <div class="actions"><button class="approve" onclick="forceClose('${esc(s.shiftId)}', this)">Clock out now</button></div>
@@ -822,7 +1056,7 @@
           <div class="name">${esc(staffName(staff, s.staffPhone))}</div>
           <div class="dept">${esc(staffDept(staff, s.staffPhone))}</div>
           <div class="divider"></div>
-          <div class="dist">📍 ${esc(s.clockIn.distanceMeters)}m from the venue</div>
+          <div class="dist">📍 ${esc(s.clockIn.distanceMeters)}m from ${esc(s.siteName || "the venue")}</div>
           <div class="since">tried at ${fmtClock(s.clockIn.time)}</div>
           <div class="actions">
             <button class="approve" onclick="review('${esc(s.shiftId)}', true, this)">Approve</button>
@@ -908,13 +1142,14 @@
       return `
       <tr>
         <td>${esc(staffName(staff, s.staffPhone))}${amendedTag}</td>
+        <td>${esc(s.siteName || "—")}</td>
         <td>${fmtDay(eff.inIso)}</td>
         <td>${fmtClock(eff.inIso)}</td>
         <td>${fmtClock(eff.outIso)}</td>
         <td class="dur">${fmtDuration(shiftMinusBreaks(s))}</td>
         <td style="text-align:right;"><button class="del-btn" title="Amend this timesheet" onclick="openAmend('${esc(s.shiftId)}')">✎</button></td>
       </tr>`;
-    }).join("") || `<tr><td colspan="6" style="color: var(--dim);">No closed shifts yet — they print here after the first clock-out.</td></tr>`;
+    }).join("") || `<tr><td colspan="7" style="color: var(--dim);">No closed shifts yet — they print here after the first clock-out.</td></tr>`;
   }
 
   /** Effective (amended-aware) shift times — originals stay for comparison. */
@@ -1103,6 +1338,12 @@
       const res = await fetch(`/api/roster?week=${rosterWeekStart}&key=${encodeURIComponent(managerKey)}`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
       rosterData = await res.json();
+      // The week's payload carries the site list too, so the pickers stay in
+      // step with a site added or deactivated in another tab.
+      if (Array.isArray(rosterData.sites)) {
+        sites = rosterData.sites;
+        renderSites();
+      }
       renderRoster();
       loadPurchases();
     } catch (err) {
@@ -1149,7 +1390,9 @@
 
     document.getElementById("rosterBody").innerHTML = boardStaff.map((person) => {
       const cells = dates.map((dateIso, dayIndex) => {
-        const slot = roster.assignments?.[dateIso]?.[person.phone] || "";
+        const cell = roster.assignments?.[dateIso]?.[person.phone];
+        const slot = slotOf(cell);
+        const cellSiteId = siteIdOf(cell);
         const avail = isAvailable(person, dateIso, dayIndex);
         let cls = "cell";
         if (slot) cls += ` slot-${slot}`;
@@ -1158,9 +1401,20 @@
         if (slot && avail === false) cls += " conflict";
         const isCustom = /^\d{2}:\d{2}-\d{2}:\d{2}$/.test(slot);
         if (isCustom) cls = cls.replace(`slot-${slot}`, "slot-CUSTOM");
+        // With several sites in play, a shift that names none can't be
+        // geofenced — outline it so it's fixed before the roster goes out.
+        const siteMissing = Boolean(slot) && siteChoiceMatters() && !cellSiteId;
+        if (siteMissing) cls += " no-site";
         const label = slot ? (isCustom ? fmtSlotLabel(slot) : slot) : "";
-        const title = slot && avail === false ? "Assigned outside declared availability" : "Click: paint/clear · Double-click: edit times";
-        return `<td><button class="${cls}" title="${title}" onclick="cellClick(event,'${dateIso}','${esc(person.phone)}')" ondblclick="openTimeEditor(event,'${dateIso}','${esc(person.phone)}')">${label}</button></td>`;
+        const siteLabel = siteChoiceMatters() && slot
+          ? `<span class="cell-site">${esc(cellSiteId ? (siteName(cellSiteId) || cellSiteId) : "no site")}</span>`
+          : "";
+        const title = siteMissing
+          ? "No site on this shift — the clock-in can't be checked against a building"
+          : slot && avail === false
+            ? "Assigned outside declared availability"
+            : "Click: paint/clear · Double-click: edit times and site";
+        return `<td><button class="${cls}" title="${title}" onclick="cellClick(event,'${dateIso}','${esc(person.phone)}')" ondblclick="openTimeEditor(event,'${dateIso}','${esc(person.phone)}')">${label}${siteLabel}</button></td>`;
       }).join("");
       return `<tr><td class="crew-cell">${esc(person.name)}</td>${cells}</tr>`;
     }).join("");
@@ -1205,13 +1459,24 @@
     localStorage.setItem(RECENTS_KEY, JSON.stringify(recents.slice(0, 6)));
   }
 
+  /**
+   * The site a fresh paint lands on: the site brush when the operator has
+   * picked one, otherwise the only active site (a single-venue board never
+   * has to think about sites at all).
+   */
+  function defaultSiteForPaint() {
+    if (siteBrush && activeSites().some((s) => s.siteId === siteBrush)) return siteBrush;
+    const options = activeSites();
+    return options.length === 1 ? options[0].siteId : "";
+  }
+
   function cellClick(ev, dateIso, phone) {
     clearTimeout(cellClickTimer);
     cellClickTimer = setTimeout(() => {
       const assignments = rosterData.roster.assignments = rosterData.roster.assignments || {};
       const day = assignments[dateIso] = assignments[dateIso] || {};
       if (day[phone]) delete day[phone];       // filled -> clear
-      else day[phone] = brush;                  // empty -> paint the brush time
+      else day[phone] = { slot: brush, siteId: defaultSiteForPaint() }; // empty -> paint brush time + site
       renderRoster();
       scheduleRosterSave();
     }, 220); // small delay so double-click can cancel and open the editor
@@ -1237,7 +1502,9 @@
     timeCellTarget = null;
     document.getElementById("timeTitle").textContent = "Brush — the shift a click paints";
     document.getElementById("clearCellBtn").style.display = "none";
-    prefillEditor(brush);
+    // The brush carries a time only; its site comes from the site brush.
+    document.getElementById("timeSiteField").style.display = "none";
+    prefillEditor(brush, "");
     renderQuickChips();
     document.getElementById("timeOverlay").classList.add("open");
   }
@@ -1247,14 +1514,17 @@
     timeCellTarget = { dateIso, phone };
     document.getElementById("timeTitle").textContent = "Edit this cell's shift";
     document.getElementById("clearCellBtn").style.display = "";
-    prefillEditor(rosterData.roster.assignments?.[dateIso]?.[phone] || brush);
+    const cell = rosterData.roster.assignments?.[dateIso]?.[phone];
+    document.getElementById("timeSiteField").style.display = activeSites().length ? "" : "none";
+    prefillEditor(slotOf(cell) || brush, cell ? siteIdOf(cell) : defaultSiteForPaint());
     renderQuickChips();
     document.getElementById("timeOverlay").classList.add("open");
   }
-  function prefillEditor(value) {
+  function prefillEditor(value, siteId) {
     const m = String(value).match(/^(\d{2}:\d{2})-(\d{2}:\d{2})$/);
     document.getElementById("timeStart").value = m ? m[1] : "09:00";
     document.getElementById("timeEnd").value = m ? m[2] : "17:00";
+    fillSiteSelect(document.getElementById("timeSite"), siteId || "");
     document.getElementById("timeErr").textContent = "";
   }
   function closeTimeEditor() {
@@ -1289,6 +1559,20 @@
       brush = value;
       localStorage.setItem(BRUSH_KEY, brush);
       renderBrushLabel();
+    } else if (timeCellTarget) {
+      const { dateIso, phone } = timeCellTarget;
+      const assignments = rosterData.roster.assignments = rosterData.roster.assignments || {};
+      const day = assignments[dateIso] = assignments[dateIso] || {};
+      day[phone] = { slot: value, siteId: document.getElementById("timeSite").value || "" };
+      renderRoster();
+      scheduleRosterSave();
+    }
+    closeTimeEditor();
+  }
+
+  /* Default the report range to last Mon–Sun. (This block used to sit inside
+     applyEditorValue, so it only ran when the brush changed and left the
+     inputs empty on load.) */
   (function initReportRange() {
     const lastMon = new Date(mondayOf(new Date()) + "T12:00:00");
     lastMon.setDate(lastMon.getDate() - 7);
@@ -1297,16 +1581,6 @@
     document.getElementById("repFrom").value = lastMon.toISOString().slice(0, 10);
     document.getElementById("repTo").value = lastSun.toISOString().slice(0, 10);
   })();
-    } else if (timeCellTarget) {
-      const { dateIso, phone } = timeCellTarget;
-      const assignments = rosterData.roster.assignments = rosterData.roster.assignments || {};
-      const day = assignments[dateIso] = assignments[dateIso] || {};
-      day[phone] = value;
-      renderRoster();
-      scheduleRosterSave();
-    }
-    closeTimeEditor();
-  }
 
   /** Hours for any slot value: preset (venue-tuned) or custom range (overnight OK). */
   function hoursForSlot(slot) {
@@ -1393,7 +1667,8 @@
     const missing = new Set();
     const hoursByPerson = {};
     for (const [dateIso, dayAssignments] of Object.entries(roster.assignments || {})) {
-      for (const [phone, slot] of Object.entries(dayAssignments)) {
+      for (const [phone, cell] of Object.entries(dayAssignments)) {
+        const slot = slotOf(cell);
         if (!slot) continue;
         const person = staff.find((s) => s.phone === phone);
         const rate = person && person.wageRate != null ? Number(person.wageRate) : null;

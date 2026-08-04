@@ -1,6 +1,7 @@
 "use strict";
 
 const { sendText } = require("./whatsapp");
+const { normalizeAssignment, mondayOf } = require("./rosterStore");
 
 /**
  * WhatsApp commands for casual-staff availability and roster viewing.
@@ -133,34 +134,35 @@ async function handleDateException(from, staff, body, deps, sendOpts) {
   return true;
 }
 
-/** Monday of the week containing `date`, as YYYY-MM-DD. */
-function mondayOf(date) {
-  const d = new Date(date);
-  const day = d.getDay(); // 0=Sun
-  const diff = day === 0 ? -6 : 1 - day;
-  d.setDate(d.getDate() + diff);
-  return d.toISOString().slice(0, 10);
-}
-
 const SLOT_LABELS = { AM: "AM", PM: "PM", ALL: "all day" };
 
 /** Handles "roster" — shows this week + next week's published assignments. */
 async function handleRosterQuery(from, staff, deps, sendOpts) {
-  const { rosterStore } = deps;
+  const { rosterStore, siteStore } = deps;
   const thisMonday = mondayOf(new Date());
   const nextMonday = mondayOf(new Date(Date.now() + 7 * 24 * 60 * 60 * 1000));
   const weeks = await rosterStore.getPublishedWeeks(staff.tenantId, [thisMonday, nextMonday]);
 
+  // An assignment names the building it's at, so the reply has to as well —
+  // a casual working three hotels this week can't act on "Tue — AM" alone.
+  const siteNames = new Map();
+  if (siteStore) {
+    const sites = await siteStore.listByTenant(staff.tenantId, { includeInactive: true });
+    for (const site of sites) siteNames.set(site.siteId, site.name);
+  }
+
   const lines = [];
   for (const week of weeks) {
     for (const [date, dayAssignments] of Object.entries(week.assignments || {})) {
-      const slot = dayAssignments[from];
-      if (!slot) continue;
+      const assignment = normalizeAssignment(dayAssignments[from]);
+      if (!assignment) continue;
       if (date < new Date().toISOString().slice(0, 10)) continue; // past days: skip
       const label = new Date(date + "T00:00:00").toLocaleDateString("en-AU", {
         weekday: "short", day: "numeric", month: "short",
       });
-      lines.push({ date, text: `${label} — ${SLOT_LABELS[slot] || slot}` });
+      const site = assignment.siteId ? siteNames.get(assignment.siteId) : null;
+      const slotLabel = SLOT_LABELS[assignment.slot] || assignment.slot;
+      lines.push({ date, text: `${label} — ${slotLabel}${site ? ` @ ${site}` : ""}` });
     }
   }
 

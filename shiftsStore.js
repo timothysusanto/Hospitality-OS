@@ -2,8 +2,8 @@
 
 /**
  * Shift records — clock in/out events, plus mid-shift breaks.
- * Data model (backend-build-scope.md):
- *   shifts/{shiftId} = { tenantId, staffId, department,
+ * Data model (backend-build-scope.md, docs/agencymodelshape.md):
+ *   shifts/{shiftId} = { tenantId, staffId, department, siteId, siteName,
  *                        clockIn: {time, lat, lng, withinRadius, distanceMeters},
  *                        clockOut: {...} | null,
  *                        breaks: [{ start, end }],
@@ -13,6 +13,14 @@
  * string) and `end` (ISO string, or null while the break is still active).
  * Only one break can be active at a time per shift — startBreak() rejects
  * if the last entry has no `end` yet.
+ *
+ * `siteId` is the building this shift was worked at, stamped at clock-in from
+ * the resolved site (see siteResolver.js) and never inferred afterwards — a
+ * clock-out, a manager review, or an invoice three months later all have to
+ * agree on which hotel this was. `siteName` is denormalized alongside it so a
+ * shift record still reads correctly after a site is renamed or deactivated.
+ * Both are null for shifts recorded before sites existed, and for the legacy
+ * tenant-geofence fallback where there genuinely is no site document.
  */
 
 class InMemoryShiftsStore {
@@ -22,13 +30,15 @@ class InMemoryShiftsStore {
     this._nextId = 1;
   }
 
-  async openShift({ tenantId, staffPhone, department, clockIn }) {
+  async openShift({ tenantId, staffPhone, department, siteId, siteName, clockIn }) {
     const shiftId = `shift_${this._nextId++}`;
     this._shifts.set(shiftId, {
       shiftId,
       tenantId,
       staffPhone,
       department,
+      siteId: siteId || null,
+      siteName: siteName || null,
       clockIn,
       clockOut: null,
       breaks: [],
@@ -145,11 +155,13 @@ class FirestoreShiftsStore {
     this.collection = db.collection("shifts");
   }
 
-  async openShift({ tenantId, staffPhone, department, clockIn }) {
+  async openShift({ tenantId, staffPhone, department, siteId, siteName, clockIn }) {
     const ref = await this.collection.add({
       tenantId,
       staffPhone,
       department,
+      siteId: siteId || null,
+      siteName: siteName || null,
       clockIn,
       clockOut: null,
       breaks: [],

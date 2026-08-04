@@ -62,10 +62,11 @@ Railway redeploys automatically after you save variables.
 4. Open that file in any text editor, copy the **entire contents**, and paste
    it as the value of `FIREBASE_SERVICE_ACCOUNT_JSON` in Railway. Railway's
    variable box accepts multi-line/JSON values fine.
-5. In `src/tenantStore.js`, update the demo venue's `geofence` lat/lng to
-   your actual venue — right-click the spot on Google Maps and the
-   coordinates are the first thing in the menu, copy them straight in
-   (do this via GitHub's file editor, same as any other code change)
+5. Add your building as a **site** from the dashboard — **Sites → + Add site**.
+   Right-click the spot on Google Maps and the coordinates are the first thing
+   in the menu; paste them into Latitude and Longitude and leave the radius at
+   75m. The clock-in geofence comes from the site, so nothing works until at
+   least one exists. (Sites live in Firestore, so no code edit and no redeploy.)
 
 The first time a clock-out happens, Firestore may reply with an error
 containing a link to create a composite index (needed for the
@@ -102,17 +103,23 @@ Send a WhatsApp message from your phone to the test number shown on
 Meta's **API Setup** page. Try the full clock in/out flow:
 
 1. Text **"in"** → the bot replies with a one-tap **share location** button
-2. Tap it → if you're within range of the venue coordinates set in
-   `tenantStore.js`, you get **"Clocked in, [name] — have a good shift!"**
+2. Tap it → if you're within range of the site you're rostered to, you get
+   **"Clocked in at [site], [name] — have a good shift!"**
 3. Text **"out"** → share location again → **"Clocked out — that was a
    0.0hr shift"** (0.0hr is correct if you test in/out within the same
    minute — real shifts will show real hours)
 
 Message from an unregistered number and you get the polite
-"not registered" reply. Share a location from far outside the venue's
+"not registered" reply. Share a location from far outside the site's
 radius and you'll get the "flagged for your manager to review" reply
 instead of a hard block — that's the deliberate no-accuracy-data design
 from the decisions log working as intended.
+
+With more than one site, the site is taken from your **rostered shift** for
+that day, so put yourself on the Service Board first. If you're not rostered
+anywhere the bot says so rather than guessing a building — an unresolved site
+is refused, not flagged. With exactly one site it's used automatically and the
+roster doesn't come into it.
 
 ## What's next (build order)
 
@@ -125,6 +132,16 @@ from the decisions log working as intended.
 | 5 | Daily P&L — fixed-cost setup + till photo | |
 | 6 | Alerts — no-show, labour % (needs Meta template approval — start early!) | |
 | 7 | Recipe lookup | |
+
+### Agency model
+
+`docs/agencymodelshape.md` sets out a second build order, for running this as a
+labour-hire agency supplying casual staff to many hotels. Its **step 1 —
+sites and a shift-level geofence** is done: a `sites` collection holds one
+geofence per building, and a clock-in is checked against the site on that
+person's rostered shift rather than one radius per tenant. Steps 2 onward
+(requests and the blast engine, weekly availability, chat intake, the
+compliance gate, timesheet sign-off, reporting) are still to come.
 
 ## Security notes (do not skip)
 
@@ -144,3 +161,7 @@ If you ever do work from a machine with Node 18+ installed:
 `npm install`, copy `.env.example` to `.env` and fill it, then
 `node --env-file=.env src/server.js` and tunnel with ngrok. The browser-only
 path above is the recommended one.
+
+`npm test` runs the suite (node's built-in test runner — no dependencies, so it
+works on a fresh clone before `npm install`). It covers site resolution and the
+clock in/out geofence path against the in-memory stores.

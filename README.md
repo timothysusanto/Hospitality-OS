@@ -136,12 +136,48 @@ roster doesn't come into it.
 ### Agency model
 
 `docs/agencymodelshape.md` sets out a second build order, for running this as a
-labour-hire agency supplying casual staff to many hotels. Its **step 1 —
-sites and a shift-level geofence** is done: a `sites` collection holds one
-geofence per building, and a clock-in is checked against the site on that
-person's rostered shift rather than one radius per tenant. Steps 2 onward
-(requests and the blast engine, weekly availability, chat intake, the
-compliance gate, timesheet sign-off, reporting) are still to come.
+labour-hire agency supplying casual staff to many hotels.
+
+| Step | What | Status |
+|---|---|---|
+| 1 | Sites and a shift-level geofence | ✅ |
+| 2 | Requests, offers and the blast engine | ✅ |
+| 3 | Weekly availability and the free-today pool | next |
+| 4 | Client intake over chat | |
+| 5 | Compliance gate and hours cap | |
+| 6 | Timesheet sign-off, bill rates, margin | |
+| 7 | Reporting | |
+
+**Step 1** put one geofence per building in a `sites` collection, so a clock-in
+is checked against the site on that person's rostered shift instead of one
+radius per tenant. Add sites from the dashboard's **Sites** section.
+
+**Step 2** added staffing requests and the dispatch engine. Raise a request from
+**Staffing Requests → + Raise request** and the blast starts immediately:
+
+- **The lane is derived from the start time, never declared.** Under twelve
+  hours out is urgent (10-minute waves), further out is planned (2-hour waves).
+  Nobody picks a priority — the API refuses to accept one.
+- Staff answer over WhatsApp with **"yes"** / **"no"**, or **"yes H7K2"** when
+  they have more than one offer open. First come, first served, and the claim is
+  atomic, so two people answering together can never take the same seat.
+- Accepting books the person onto the Service Board at the request's site, which
+  is what makes their clock-in resolve the right building.
+- **Auto-backfill:** no clock-in fifteen minutes after a rostered start fires
+  the urgent blast on its own. The supervisor notices the gap at 7:15; the
+  replacement was accepted at 7:04.
+
+The engine is a tick loop, not a set of timers: all dispatch state lives on the
+request documents, so a redeploy mid-blast resumes instead of abandoning a
+half-filled request. Set `DISPATCH_DISABLED=1` to run an instance without it —
+needed if you ever point a second instance at the same Firestore project, so two
+loops don't both blast the same request.
+
+Two things step 2 deliberately does **not** do yet, because they are later
+steps: waves 1 of both lanes (declared availability, the free-today pool) have
+no data source until step 3 and are skipped, so a blast currently starts at
+"everyone not already booked, ranked by reliability"; and no compliance gate is
+applied until step 5.
 
 ## Security notes (do not skip)
 
@@ -163,5 +199,8 @@ If you ever do work from a machine with Node 18+ installed:
 path above is the recommended one.
 
 `npm test` runs the suite (node's built-in test runner — no dependencies, so it
-works on a fresh clone before `npm install`). It covers site resolution and the
-clock in/out geofence path against the in-memory stores.
+works on a fresh clone before `npm install`). It covers site resolution, the
+clock in/out geofence path, and the dispatch engine — lane derivation, wave
+progression, the first-come race, expiry, and backfill deduping — against the
+in-memory stores. Time is injected rather than slept on, so the whole suite runs
+in under a second.

@@ -3,6 +3,10 @@
 const { sendText, sendLocationRequest } = require("./whatsapp");
 const { checkGeofence } = require("./geofence");
 const { resolveSiteForClockIn, describeResolutionFailure, resolutionLabel } = require("./siteResolver");
+const { slotWindow } = require("./rosterStore");
+
+/** Grace before a clock-in counts as late against the rostered start. */
+const LATE_AFTER_MS = 5 * 60 * 1000;
 
 /**
  * Handles the clock in/out flow, plus mid-shift breaks. Clock in/out is
@@ -94,11 +98,42 @@ async function clockIn(from, staff, reported, deps, sendOpts) {
       siteSource: resolution.source,
     },
   });
+  await recordShowedUp(from, staff, deps);
   await sendText(
     from,
     `Clocked in at ${siteLabel}, ${staff.name} — have a good shift! (${shiftId})`,
     sendOpts
   );
+}
+
+/**
+ * Turning up is the other half of reliability — the half the blast engine ranks
+ * wave 1 of the planned lane on. Lateness is measured against the rostered
+ * start, so it only counts against someone who had a roster entry to be late
+ * for; an unrostered clock-in is recorded as showing up, on time by default.
+ *
+ * Best-effort: a reliability write must never cost somebody their clock-in.
+ */
+async function recordShowedUp(from, staff, deps) {
+  const { staffStore, rosterStore } = deps;
+  if (!staffStore || !staffStore.recordShiftResult) return;
+  try {
+    const now = new Date();
+    const dateIso =
+      `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}` +
+      `-${String(now.getDate()).padStart(2, "0")}`;
+
+    let late = false;
+    if (rosterStore && rosterStore.findAssignment) {
+      const assignment = await rosterStore.findAssignment(staff.tenantId, dateIso, from);
+      const window = assignment ? slotWindow(assignment.slot, dateIso) : null;
+      if (window) late = now.getTime() > window.startsAt.getTime() + LATE_AFTER_MS;
+    }
+
+    await staffStore.recordShiftResult(from, { showed: true, late });
+  } catch (err) {
+    console.error("[clock] failed to record show-up:", err.message);
+  }
 }
 
 async function clockOut(from, staff, reported, deps, sendOpts) {

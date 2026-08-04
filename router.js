@@ -4,6 +4,7 @@ const { sendText } = require("./whatsapp");
 const { requestClockAction, handleLocationForClockAction, startBreak, endBreak } = require("./clockHandler");
 const { handleAvailCommand, handleDateException, handleRosterQuery } = require("./availabilityHandler");
 const { handleSpendCommand } = require("./foodCostHandler");
+const { handleOfferReply, looksLikeOfferReply } = require("./offerHandler");
 
 /**
  * Route a single incoming WhatsApp message.
@@ -82,10 +83,17 @@ async function handleIncoming(message, deps, tenantContext = null) {
       await handleSpendCommand(from, staff, body, deps, sendOpts);
       return;
     }
+    // Answering a shift offer. Checked last among the text commands so it can
+    // never shadow a clock or availability word, and only when the message
+    // actually opens with a yes/no.
+    if (looksLikeOfferReply(body)) {
+      await handleOfferReply(from, staff, body, deps, sendOpts);
+      return;
+    }
 
     await sendText(
       from,
-      `Hi ${staff.name} — commands: "in"/"out" to clock in/out, "break"/"back" for breaks, "avail mon tue fri" to set availability, "off 3/8" for a day off, "roster" to see your shifts, "spend 420 bidfood" to log a delivery.`,
+      `Hi ${staff.name} — commands: "in"/"out" to clock in/out, "break"/"back" for breaks, "yes"/"no" to answer a shift offer, "avail mon tue fri" to set availability, "off 3/8" for a day off, "roster" to see your shifts, "spend 420 bidfood" to log a delivery.`,
       sendOpts
     );
     return;

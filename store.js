@@ -5,7 +5,7 @@ const { normalizeReliability, withOfferSent, withOfferAnswered, withShiftResult 
 /**
  * Staff lookup, behind an interface. Firestore-backed when
  * FIREBASE_SERVICE_ACCOUNT_JSON is configured, in-memory fallback otherwise
- * (see src/firebase.js and src/stores.js for the factory that picks which).
+ * (see firebase.js and stores.js for the factory that picks which).
  *
  * Data model (backend-build-scope.md, docs/agencymodelshape.md):
  *   staff/{phoneNumber}: { tenantId, name, role, department, wageRate,

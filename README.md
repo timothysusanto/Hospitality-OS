@@ -143,8 +143,8 @@ labour-hire agency supplying casual staff to many hotels.
 | 1 | Sites and a shift-level geofence | ✅ |
 | 2 | Requests, offers and the blast engine | ✅ |
 | 3 | Weekly availability and the free-today pool | ✅ |
-| 4 | Client intake over chat | next |
-| 5 | Compliance gate and hours cap | |
+| 4 | Client intake over chat | ✅ |
+| 5 | Compliance gate and hours cap | next |
 | 6 | Timesheet sign-off, bill rates, margin | |
 | 7 | Reporting | |
 
@@ -208,6 +208,44 @@ Wave 2 reaches **only** the unknown, not everyone we haven't heard a yes from.
 Somebody who told us they're unavailable has answered, and blasting them again is
 how a casual pool learns to ignore the messages. Only the urgent lane's third
 wave overrides that, and the message says so.
+
+**Step 4** put client intake on the same WhatsApp number. **One number, two
+conversations** — sender identity decides which one you're in:
+
+1. A number registered as a **requester** on a site is a hotel ordering staff.
+   Checked first, so an agency supervisor who is also on the staff list is
+   ordering when they type "need 3 housekeepers", not clocking in.
+2. A number in the staff collection is a **worker**.
+3. Anything else is asked to have its manager register it. **Only registered
+   numbers can order.**
+
+Register them per site: **`POST /api/sites/:id/requesters`** with
+`{requesters: [{phone, name}]}`.
+
+The hotel side of the conversation:
+
+```
+←  need 3 housekeepers tomorrow 7am
+→  3 × Housekeeping — Hilton Sydney
+   Tue, 11 Aug, 07:00–15:00
+   (I've assumed an 8 hour shift — tell me if it's different.)
+   Reply CONFIRM to send it, or CANCEL to start again.
+←  confirm
+→  Confirmed — H7K2. Searching now, I'll message you as people accept.
+→  1 of 3 filled for H7K2: Maria S.
+```
+
+**Never dispatch on an unconfirmed parse.** That confirm step is the contract,
+the audit trail, and the guard against sending thirty people because somebody
+typed "30" meaning "3:00". The guard is structural rather than a rule the code
+has to remember: a draft is stored with `confirmedAt: null`, and the blast
+engine's work list excludes those, so an unconfirmed order physically cannot go
+out. Anything the parser can't work out is asked for, never assumed. A hotel can
+type `status` any time for names and fill counts.
+
+Phone calls aren't banned, they're out-competed. When one happens, the operator
+types it into the dashboard against the requester's number — same collection,
+same fields. A written trail of what was ordered is what wins invoice disputes.
 
 Still to come: no compliance gate until step 5.
 

@@ -9,17 +9,37 @@ const {
   looksLikeAvailabilityReply, handleSameAgain, handleNotAvailable,
   handleFreeToday, handleShorthand, SAME_RE, NONE_RE, TODAY_RE,
 } = require("./availabilityCapture");
+const { handleClientMessage, requesterSites } = require("./intakeHandler");
+
+/**
+ * Fallback tenant for a sender we can't attribute — matches server.js's
+ * DASHBOARD_TENANT_ID. Only used to look up whether an unknown number is a
+ * registered requester; it grants nothing on its own.
+ */
+const DEFAULT_TENANT_ID = process.env.DEFAULT_TENANT_ID || "demo-venue";
 
 /**
  * Route a single incoming WhatsApp message.
  *
- * Build step 2 status: clock in/out and breaks are real. Stock (photo),
- * P&L (photo), and recipe lookup are still stubbed — each arrives as its
- * own handler module in later steps (frontend unified, backend modular —
- * decisions log).
+ * ## One number, two conversations
+ *
+ * Staff and hotels run on the same WhatsApp number, and **sender identity
+ * decides which conversation you're in** (docs/agencymodelshape.md step 4). The
+ * order below matters:
+ *
+ *   1. A number registered as a requester on a site is a **client** ordering
+ *      staff. Checked first, because a hotel manager who is also on the staff
+ *      list — an agency's own supervisor covering a shift — is ordering when
+ *      they type "need 3 housekeepers", not clocking in.
+ *   2. A number in the staff collection is a **worker**.
+ *   3. Anything else is asked to have its manager register it. Only registered
+ *      numbers can order, and only registered numbers can work.
+ *
+ * A client's message never reaches the staff commands, so "no" from a hotel
+ * cancelling a draft can't be read as declining a shift offer.
  *
  * @param {object} message   One entry from value.messages[] in the webhook payload
- * @param {object} deps      { staffStore, tenantStore, shiftsStore, pendingActions }
+ * @param {object} deps      stores, pendingActions, and optionally `dispatcher`
  * @param {{tenantId: string, phoneNumberId: string, token: string|null}|null} tenantContext
  *   Which venue's WhatsApp number this message arrived on (multi-tenant
  *   support). Null in a single-venue deployment — every downstream call
@@ -38,15 +58,36 @@ async function handleIncoming(message, deps, tenantContext = null) {
     : {};
 
   const staff = await staffStore.findByPhone(from);
+  const tenantId = tenantContext?.tenantId || (staff && staff.tenantId) || DEFAULT_TENANT_ID;
+  const clientSites = await requesterSites(tenantId, from, deps);
 
   console.log(
-    `[incoming] from=${from} type=${type} tenant=${tenantContext?.tenantId || "(default)"} staff=${staff ? `${staff.name}/${staff.role}@${staff.tenantId}` : "UNKNOWN"}`
+    `[incoming] from=${from} type=${type} tenant=${tenantId} ` +
+      `as=${clientSites ? `client(${clientSites.map((s) => s.siteId).join("|")})` : staff ? `${staff.name}/${staff.role}` : "UNKNOWN"}`
   );
+
+  // 1. A hotel ordering staff.
+  if (clientSites && type === "text") {
+    const body = (message.text?.body || "").trim().toLowerCase();
+    await handleClientMessage(from, clientSites, body, deps, sendOpts);
+    return;
+  }
+  if (clientSites) {
+    await sendText(
+      from,
+      "Thanks — I can only read text messages here. Tell me what you need, e.g. " +
+        '"3 housekeepers tomorrow 7am-3pm".',
+      sendOpts
+    );
+    return;
+  }
 
   if (!staff) {
     await sendText(
       from,
-      "Hi! This number isn't registered with any venue yet. Ask your manager to add you, then message again.",
+      "Hi! This number isn't registered yet. If you're staff, ask your manager to add you. " +
+        "If you're booking staff, ask your manager to register this number for your hotel. " +
+        "Then message again.",
       sendOpts
     );
     return;

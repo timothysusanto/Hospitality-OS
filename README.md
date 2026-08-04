@@ -87,7 +87,7 @@ no config needed beyond that one click.
 The skeleton only replies fully to numbers it recognises. Edit the seed
 record — in the browser:
 
-1. In your GitHub repo, open `src/store.js`
+1. In your GitHub repo, open `store.js`
 2. Click the **pencil icon** (Edit this file)
 3. Replace `61400000000` with your own number — international format,
    country code, **no +** (e.g. an Australian 0412 345 678 becomes
@@ -352,7 +352,7 @@ is how a grid tells you you're fine on a day you aren't.
 - Secrets live **only** in Railway's Variables tab — never in the code, never
   committed to GitHub. `.gitignore` blocks `.env` files as a safety net.
 - Every webhook POST is signature-verified against `META_APP_SECRET`
-  (`src/verifySignature.js`). Never disable this, including in testing.
+  (`verifySignature.js`). Never disable this, including in testing.
 - When Firestore arrives (step 2): every document carries `tenantId`, and
   security rules must enforce it — see "Data safety & role-based access
   control" in the decisions log. The bot backend additionally passes every
@@ -363,8 +363,8 @@ is how a grid tells you you're fine on a day you aren't.
 
 If you ever do work from a machine with Node 18+ installed:
 `npm install`, copy `.env.example` to `.env` and fill it, then
-`node --env-file=.env src/server.js` and tunnel with ngrok. The browser-only
-path above is the recommended one.
+`node --env-file=.env server.js` (or `npm run dev` to reload on save) and tunnel
+with ngrok. The browser-only path above is the recommended one.
 
 `npm test` runs the suite (node's built-in test runner — no dependencies, so it
 works on a fresh clone before `npm install`). It covers site resolution, the

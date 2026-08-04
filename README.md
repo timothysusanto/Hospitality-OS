@@ -146,7 +146,7 @@ labour-hire agency supplying casual staff to many hotels.
 | 4 | Client intake over chat | ✅ |
 | 5 | Compliance gate and hours cap | ✅ |
 | 6 | Timesheet sign-off, bill rates, margin | ✅ |
-| 7 | Reporting | next |
+| 7 | Reporting | ✅ |
 
 **Step 1** put one geofence per building in a `sites` collection, so a clock-in
 is checked against the site on that person's rostered shift instead of one
@@ -317,6 +317,35 @@ Two things the margin maths gets right that are easy to get wrong:
 `GET /api/reports/margin` splits by lane, because blending planned and urgent
 hides both — urgent skews to nights and weekends, and reported apart it becomes
 a column you can price against.
+
+**Step 7** added the reports. `GET /api/reports/agency?from=&to=&week=` returns
+all of them in one call:
+
+| Report | Split | What it's for |
+|---|---|---|
+| Fill rate | planned / urgent | The headline. Two denominators: share of *seats* filled, and share of *requests* filled completely. |
+| Time to fill | urgent | Median minutes, **from the hotel's confirm** — time spent waiting for them to reply isn't yours. |
+| Lost demand | site & hour | Seats you couldn't fill. "We never fill 6am Saturdays" is actionable; a daily total isn't. |
+| Supply vs demand | 7 × 3 grid | Declared headcount against demand per day-block. Shows you're three Night people short on Saturday before you fail. |
+| Margin | planned / urgent | Approved hours only. |
+| Reliability | per person | Offered, accepted, showed, late, no-showed. |
+| Response latency | per person | Median seconds to answer. Your genuine top staff. |
+| Free-today by hour | urgent | Thin at 5am Saturdays is a recruitment target, months early. |
+| Client hours | per site | Approved / awaiting / queried kept apart — only the first is invoiceable. |
+
+Three things the reports are careful about:
+
+- **A denominator of zero reports `null`, not 0%.** "0% fill rate" and "no
+  requests yet" look identical otherwise, and only one of them is a problem.
+- **Nothing recomputes a rule.** Fill rate reads `outcome`, latency reads the
+  offer timestamps, margin calls the same function the invoicing view does. A
+  report that re-derives a rule eventually disagrees with what enforced it.
+- **Cancelled requests are neither a hit nor a miss.** A hotel changing its mind
+  must not drag the fill rate down.
+
+Supply counts people who said yes **and aren't already booked** in that cell — a
+declaration from somebody already working isn't available supply, and counting it
+is how a grid tells you you're fine on a day you aren't.
 
 ## Security notes (do not skip)
 

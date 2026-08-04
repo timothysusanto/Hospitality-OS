@@ -6,6 +6,7 @@ const { responseSeconds } = require("./offersStore");
 const { rankStaff } = require("./reliability");
 const { canWorkRole } = require("./store");
 const { slotWindow, windowsOverlap, mondayOf } = require("./rosterStore");
+const { sweepWeeklyPings } = require("./availabilityCapture");
 
 /**
  * The blast engine — build order step 2 of docs/agencymodelshape.md.
@@ -125,10 +126,22 @@ async function bookedPhones(request, deps) {
 /**
  * Who a given wave tier reaches, before the booked and already-offered filters.
  *
- * `available` and `freeToday` depend on collections that arrive in step 3. They
- * return null — meaning "this audience can't be determined yet" — which the
- * caller treats as an empty wave and skips. Returning [] would be
- * indistinguishable from "nobody is free", which is a different fact.
+ * The tiers map onto availability's three states:
+ *
+ *   available — said yes to this block. Wave 1 of the planned lane.
+ *   freeToday — opted into today's pool. Wave 1 of the urgent lane.
+ *   unknown   — we have no answer from them for this block. Wave 2 of both.
+ *   all       — everybody, including people who said no. Urgent wave 3 only,
+ *               where a hotel is short in an hour and asking anyway is fair.
+ *
+ * `unknown` deliberately excludes people who declared themselves unavailable.
+ * They answered; blasting them again is how a casual pool learns to ignore the
+ * messages. Only the urgent lane's last wave overrides that, and it says so in
+ * the message.
+ *
+ * Returns null when an audience cannot be determined at all — a store that
+ * isn't configured. The caller treats that as an empty wave and skips it, which
+ * is different from `[]` meaning "nobody qualifies".
  *
  * @returns {Promise<object[]|null>}
  */
@@ -139,20 +152,23 @@ async function audienceFor(tier, request, deps) {
   // unless they've been given job roles explicitly.
   const pool = roster.filter((s) => canWorkRole(s, request.role));
 
-  if (tier === "all" || tier === "unknown") return pool;
+  if (tier === "all") return pool;
+
+  if (tier === "unknown") {
+    // Without an availability store nobody has answered anything, so unknown is
+    // the whole pool — which is exactly right.
+    if (!availabilityStore || !availabilityStore.filterUnknown) return pool;
+    return availabilityStore.filterUnknown(pool, request);
+  }
 
   if (tier === "available") {
-    if (!availabilityStore) return null;
-    return availabilityStore.filterAvailable
-      ? availabilityStore.filterAvailable(pool, request)
-      : null;
+    if (!availabilityStore || !availabilityStore.filterAvailable) return null;
+    return availabilityStore.filterAvailable(pool, request);
   }
 
   if (tier === "freeToday") {
-    if (!freeTodayStore) return null;
-    return freeTodayStore.filterFreeToday
-      ? freeTodayStore.filterFreeToday(pool, request)
-      : null;
+    if (!freeTodayStore || !freeTodayStore.filterFreeToday) return null;
+    return freeTodayStore.filterFreeToday(pool, request);
   }
 
   return null;
@@ -527,6 +543,13 @@ async function tick(tenantId, deps, sendOpts = {}, now = new Date()) {
     return [];
   });
 
+  // Ask Wednesday, chase Friday. Idempotent, so running it on every tick all
+  // Wednesday pings each person exactly once.
+  const pinged = await sweepWeeklyPings(tenantId, deps, sendOpts, now).catch((err) => {
+    console.error("[availability] ping sweep failed:", err);
+    return { asked: 0, chased: 0 };
+  });
+
   const open = await requestsStore.listOpen(tenantId);
   for (const request of open) {
     try {
@@ -535,7 +558,12 @@ async function tick(tenantId, deps, sendOpts = {}, now = new Date()) {
       console.error(`[dispatch] ${request.ref} failed to advance:`, err);
     }
   }
-  return { advanced: open.length, backfilled: backfilled.length };
+  return {
+    advanced: open.length,
+    backfilled: backfilled.length,
+    asked: pinged.asked,
+    chased: pinged.chased,
+  };
 }
 
 /**

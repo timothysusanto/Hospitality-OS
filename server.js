@@ -19,6 +19,10 @@ const { normalizeAssignment, normalizeAssignments } = require("./rosterStore");
 const { normalizeGeofence, slugifySiteId, MIN_RADIUS_METERS, MAX_RADIUS_METERS } = require("./siteStore");
 const { laneFor, seatsRemaining } = require("./requestsStore");
 const { createDispatcher } = require("./dispatch");
+const { verify: verifyLink, isConfigured: linksConfigured } = require("./signedLinks");
+const { gridModel, nextWeekStart } = require("./availabilityCapture");
+const { normalizeDays, declaredCellCount, isSubmitted } = require("./availabilityStore");
+const { weekStartOf, weekDates, BLOCKS, DAY_KEYS, normalizeBlocks } = require("./availabilityBlocks");
 
 // The single venue this build supports so far (see decisions log — multi-
 // tenant support is a later step). The dashboard is scoped to this tenant.
@@ -27,11 +31,13 @@ const DASHBOARD_TENANT_ID = "demo-venue";
 const app = express();
 const {
   staffStore, tenantStore, siteStore, requestsStore, offersStore,
+  availabilityStore, freeTodayStore,
   shiftsStore, rosterStore, purchasesStore, backend,
 } = buildStores();
 const pendingActions = new InMemoryPendingActions();
 const deps = {
   staffStore, tenantStore, siteStore, requestsStore, offersStore,
+  availabilityStore, freeTodayStore,
   shiftsStore, rosterStore, purchasesStore, pendingActions,
 };
 
@@ -147,6 +153,139 @@ async function resolveTenantAndHandle(message, incomingPhoneNumberId) {
 }
 
 /**
+ * Availability, rung 3 of the capture ladder (docs/agencymodelshape.md step 3).
+ *
+ * GET /a/:token — the 7 × 3 chip grid. Twenty seconds, no login, no password:
+ * the signed link IS the credential. See signedLinks.js for what that token
+ * does and does not grant.
+ *
+ * Deliberately NOT behind requireDashboardKey — the whole point is that a casual
+ * can answer from a WhatsApp message without an account. The token restricts it
+ * to one person, one week.
+ */
+app.get("/a/:token", (_req, res) => {
+  res.sendFile(path.join(__dirname, "public", "availability.html"));
+});
+
+/**
+ * GET /api/availability/:token — the week to render. The client fetches this
+ * rather than having it templated in, so the page is a static file the CDN can
+ * cache and the token is only ever validated server-side.
+ */
+app.get("/api/availability/:token", async (req, res) => {
+  try {
+    const check = verifyLink(req.params.token);
+    if (!check.ok) return res.status(401).json({ error: linkError(check.reason) });
+    const { tenantId, phone, weekStart, scope } = check.claims;
+    if (scope !== "availability") return res.status(403).json({ error: "That link isn't for this page." });
+
+    const [staff, doc] = await Promise.all([
+      staffStore.findByPhone(phone),
+      availabilityStore.findOrEmpty(tenantId, phone, weekStart),
+    ]);
+    if (!staff || staff.tenantId !== tenantId) {
+      return res.status(404).json({ error: "We can't find your record — please ask your manager." });
+    }
+
+    res.json({ name: staff.name, ...gridModel(doc, weekStart) });
+  } catch (err) {
+    console.error("[availability] failed to load grid:", err);
+    res.status(500).json({ error: "Couldn't load your week — please try again." });
+  }
+});
+
+/**
+ * POST /api/availability/:token — the grid submitting.
+ * Body: { days: { "YYYY-MM-DD": ["AM","PM","NIGHT"] } }
+ *
+ * An empty `days` is a real answer, not a mistake: it means "I can't work next
+ * week". The three-state model depends on that being distinguishable from never
+ * having replied, which is why submitting always sets `submittedAt`.
+ */
+app.post("/api/availability/:token", async (req, res) => {
+  try {
+    const check = verifyLink(req.params.token);
+    if (!check.ok) return res.status(401).json({ error: linkError(check.reason) });
+    const { tenantId, phone, weekStart, scope } = check.claims;
+    if (scope !== "availability") return res.status(403).json({ error: "That link isn't for this page." });
+
+    const staff = await staffStore.findByPhone(phone);
+    if (!staff || staff.tenantId !== tenantId) {
+      return res.status(404).json({ error: "We can't find your record — please ask your manager." });
+    }
+
+    const days = normalizeDays((req.body || {}).days, weekStart);
+    const doc = await availabilityStore.submit(tenantId, phone, weekStart, days, "grid");
+    res.json({ ok: true, cells: declaredCellCount(doc), submittedAt: doc.submittedAt });
+  } catch (err) {
+    console.error("[availability] failed to submit:", err);
+    res.status(500).json({ error: "Couldn't save that — please try again." });
+  }
+});
+
+/** Staff-facing wording for a link that didn't verify. */
+function linkError(reason) {
+  switch (reason) {
+    case "EXPIRED":
+      return "This link has expired. Message us and we'll send a fresh one.";
+    case "NOT_CONFIGURED":
+      return "Links aren't set up on this deployment yet — please tell your manager.";
+    default:
+      return "This link doesn't look right. Message us and we'll send a fresh one.";
+  }
+}
+
+/**
+ * GET /api/availability?week=YYYY-MM-DD — the supply side of the supply-vs-demand
+ * grid: declared headcount per day-block for the whole tenant, plus who hasn't
+ * answered. Shows you're twelve Night people short on Saturday before you fail
+ * to fill it.
+ */
+app.get("/api/availability", requireDashboardKey, async (req, res) => {
+  try {
+    const weekStart = req.query.week
+      ? weekStartOf(`${String(req.query.week)}T12:00:00`)
+      : nextWeekStart();
+    const [docs, staff] = await Promise.all([
+      availabilityStore.listByWeek(DASHBOARD_TENANT_ID, weekStart),
+      staffStore.listByTenant(DASHBOARD_TENANT_ID),
+    ]);
+
+    const byPhone = new Map(docs.map((d) => [d.phone, d]));
+    // 7 × 3 counts of people who said yes.
+    const grid = {};
+    for (const dateIso of weekDates(weekStart)) {
+      grid[dateIso] = Object.fromEntries(BLOCKS.map((b) => [b, 0]));
+    }
+    for (const doc of docs) {
+      if (!isSubmitted(doc)) continue;
+      for (const [dateIso, blocks] of Object.entries(doc.days || {})) {
+        if (!grid[dateIso]) continue;
+        for (const block of blocks) if (grid[dateIso][block] !== undefined) grid[dateIso][block] += 1;
+      }
+    }
+
+    // Three states, reported apart. Silence is not a no.
+    const answered = staff.filter((s) => isSubmitted(byPhone.get(s.phone)));
+    const silent = staff.filter((s) => !isSubmitted(byPhone.get(s.phone)));
+    const unavailable = answered.filter((s) => declaredCellCount(byPhone.get(s.phone)) === 0);
+
+    res.json({
+      weekStart,
+      grid,
+      poolSize: staff.length,
+      answered: answered.length,
+      unavailable: unavailable.length,
+      unknown: silent.map((s) => ({ phone: s.phone, name: s.name })),
+      freeTodayNow: (await freeTodayStore.listLive(DASHBOARD_TENANT_ID)).length,
+    });
+  } catch (err) {
+    console.error("[availability] failed to load week:", err);
+    res.status(500).json({ error: "Failed to load availability." });
+  }
+});
+
+/**
  * Manager dashboard (build step 3) — a page served directly by this server,
  * reading real data through the same admin Firestore connection the bot
  * already uses. No separate client-side Firebase config or security rules
@@ -243,6 +382,24 @@ app.post("/api/staff", requireDashboardKey, async (req, res) => {
     if (wageRate != null && (!isFinite(wageRate) || wageRate < 0)) {
       return res.status(400).json({ error: "wageRate must be a non-negative number." });
     }
+
+    // The jobs this person can be sent to do — matched against a request's role.
+    // Distinct from `role` above, which is their access level.
+    const roles = Array.isArray(req.body.roles)
+      ? [...new Set(req.body.roles.map((r) => String(r).trim().toLowerCase()).filter(Boolean))]
+      : undefined;
+
+    // Rung 2 of the capture ladder: "normally free AM Mon–Fri", captured once,
+    // which turns the weekly ping into confirm-or-amend.
+    let standingPattern;
+    if (req.body.standingPattern && typeof req.body.standingPattern === "object") {
+      standingPattern = {};
+      for (const day of DAY_KEYS) {
+        const blocks = normalizeBlocks(req.body.standingPattern[day]);
+        if (blocks.length) standingPattern[day] = blocks;
+      }
+    }
+
     await staffStore.upsert({
       phone: String(phone).trim(),
       tenantId: DASHBOARD_TENANT_ID,
@@ -250,6 +407,8 @@ app.post("/api/staff", requireDashboardKey, async (req, res) => {
       role,
       department: department ? String(department).trim() : null,
       wageRate,
+      ...(roles ? { roles } : {}),
+      ...(standingPattern ? { standingPattern } : {}),
     });
     res.json({ ok: true });
   } catch (err) {

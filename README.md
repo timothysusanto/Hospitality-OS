@@ -142,8 +142,8 @@ labour-hire agency supplying casual staff to many hotels.
 |---|---|---|
 | 1 | Sites and a shift-level geofence | ✅ |
 | 2 | Requests, offers and the blast engine | ✅ |
-| 3 | Weekly availability and the free-today pool | next |
-| 4 | Client intake over chat | |
+| 3 | Weekly availability and the free-today pool | ✅ |
+| 4 | Client intake over chat | next |
 | 5 | Compliance gate and hours cap | |
 | 6 | Timesheet sign-off, bill rates, margin | |
 | 7 | Reporting | |
@@ -173,11 +173,43 @@ half-filled request. Set `DISPATCH_DISABLED=1` to run an instance without it —
 needed if you ever point a second instance at the same Firestore project, so two
 loops don't both blast the same request.
 
-Two things step 2 deliberately does **not** do yet, because they are later
-steps: waves 1 of both lanes (declared availability, the free-today pool) have
-no data source until step 3 and are skipped, so a blast currently starts at
-"everyone not already booked, ranked by reliability"; and no compliance gate is
-applied until step 5.
+**Step 3** added weekly availability, so the blast waves now mean what they say.
+Staff answer in three blocks — **AM** 06:00–14:00, **PM** 14:00–22:00,
+**Night** 22:00–06:00 — and the system stores real times, so matching stays
+exact. A night belongs to the date it starts on: "Friday night" is Friday into
+Saturday.
+
+**Three states, not two: available, unavailable, and unknown.** Silence is never
+a yes, and it is never a no either. Sending the weekly ping records that we
+asked without inventing an answer, so somebody who hasn't replied stays unknown
+and simply waits for a later wave.
+
+Nobody in the office types availability. The capture ladder, in order of
+leverage — staff reply on WhatsApp:
+
+| Reply | What it does |
+|---|---|
+| `same` | Repeats last week in one word, or the standing pattern if they've never answered. The highest-leverage rung. |
+| `none` | An explicit "can't work next week" — a real answer, so they stop being offered shifts. |
+| `today` | Joins the free-today pool for about 12 hours. Opt-in, self-expiring, first refusal on today's work. |
+| `mon am pm, fri all` | The shorthand, for the people who like typing. Ranges (`mon-fri am`) work too. |
+| a tap | A signed one-tap link to a 7 × 3 chip grid. No login, no password. Twenty seconds. |
+
+The weekly cycle runs itself: **ask Wednesday, chase Friday, expire with the
+week**, so supply is on the board before the hotels' requests land. Nobody is
+pinged twice and nobody who has answered is chased.
+
+Set **`LINK_SIGNING_SECRET`** (16+ characters) and **`PUBLIC_BASE_URL`** for the
+one-tap links to work. Without them the ping falls back to the shorthand hint
+rather than sending a broken link — the app refuses to issue an unsigned link,
+because that would let anyone submit anyone's availability by editing a URL.
+
+Wave 2 reaches **only** the unknown, not everyone we haven't heard a yes from.
+Somebody who told us they're unavailable has answered, and blasting them again is
+how a casual pool learns to ignore the messages. Only the urgent lane's third
+wave overrides that, and the message says so.
+
+Still to come: no compliance gate until step 5.
 
 ## Security notes (do not skip)
 

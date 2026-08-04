@@ -9,6 +9,8 @@ const { InMemoryPurchasesStore, FirestorePurchasesStore } = require("./purchases
 const { InMemorySiteStore, FirestoreSiteStore } = require("./siteStore");
 const { InMemoryRequestsStore, FirestoreRequestsStore } = require("./requestsStore");
 const { InMemoryOffersStore, FirestoreOffersStore } = require("./offersStore");
+const { InMemoryAvailabilityStore, FirestoreAvailabilityStore } = require("./availabilityStore");
+const { InMemoryFreeTodayStore, FirestoreFreeTodayStore } = require("./freeTodayStore");
 
 /**
  * One place that decides: real Firestore, or in-memory for early testing.
@@ -25,6 +27,8 @@ function buildStores() {
       siteStore: new FirestoreSiteStore(db),
       requestsStore: new FirestoreRequestsStore(db),
       offersStore: new FirestoreOffersStore(db),
+      availabilityStore: new FirestoreAvailabilityStore(db),
+      freeTodayStore: new FirestoreFreeTodayStore(db),
       shiftsStore: new FirestoreShiftsStore(db),
       rosterStore: new FirestoreRosterStore(db),
       purchasesStore: new FirestorePurchasesStore(db),
@@ -38,6 +42,8 @@ function buildStores() {
     siteStore: new InMemorySiteStore(),
     requestsStore: new InMemoryRequestsStore(),
     offersStore: new InMemoryOffersStore(),
+    availabilityStore: new InMemoryAvailabilityStore(),
+    freeTodayStore: new InMemoryFreeTodayStore(),
     shiftsStore: new InMemoryShiftsStore(),
     rosterStore: new InMemoryRosterStore(),
     purchasesStore: new InMemoryPurchasesStore(),

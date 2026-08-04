@@ -5,6 +5,10 @@ const { requestClockAction, handleLocationForClockAction, startBreak, endBreak }
 const { handleAvailCommand, handleDateException, handleRosterQuery } = require("./availabilityHandler");
 const { handleSpendCommand } = require("./foodCostHandler");
 const { handleOfferReply, looksLikeOfferReply } = require("./offerHandler");
+const {
+  looksLikeAvailabilityReply, handleSameAgain, handleNotAvailable,
+  handleFreeToday, handleShorthand, SAME_RE, NONE_RE, TODAY_RE,
+} = require("./availabilityCapture");
 
 /**
  * Route a single incoming WhatsApp message.
@@ -83,17 +87,31 @@ async function handleIncoming(message, deps, tenantContext = null) {
       await handleSpendCommand(from, staff, body, deps, sendOpts);
       return;
     }
-    // Answering a shift offer. Checked last among the text commands so it can
-    // never shadow a clock or availability word, and only when the message
+    // The weekly availability words — rungs 1, 2 and 5 of the capture ladder.
+    if (looksLikeAvailabilityReply(body)) {
+      if (TODAY_RE.test(body)) await handleFreeToday(from, staff, deps, sendOpts);
+      else if (NONE_RE.test(body)) await handleNotAvailable(from, staff, deps, sendOpts);
+      else if (SAME_RE.test(body)) await handleSameAgain(from, staff, deps, sendOpts);
+      return;
+    }
+    // Answering a shift offer. Checked after the fixed words so it can never
+    // shadow a clock or availability command, and only when the message
     // actually opens with a yes/no.
     if (looksLikeOfferReply(body)) {
       await handleOfferReply(from, staff, body, deps, sendOpts);
       return;
     }
+    // Rung 4 — the shorthand. Last, because it is the only handler that reads a
+    // free-form message, and it declines anything it can't parse into days and
+    // blocks rather than guessing.
+    if (await handleShorthand(from, staff, body, deps, sendOpts)) return;
 
     await sendText(
       from,
-      `Hi ${staff.name} — commands: "in"/"out" to clock in/out, "break"/"back" for breaks, "yes"/"no" to answer a shift offer, "avail mon tue fri" to set availability, "off 3/8" for a day off, "roster" to see your shifts, "spend 420 bidfood" to log a delivery.`,
+      `Hi ${staff.name} — commands: "in"/"out" to clock in/out, "break"/"back" for breaks, ` +
+        `"yes"/"no" to answer a shift offer, "same" to repeat last week's availability, ` +
+        `"today" to join today's pool, "mon am pm, fri all" to set your week, ` +
+        `"roster" to see your shifts, "spend 420 bidfood" to log a delivery.`,
       sendOpts
     );
     return;

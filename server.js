@@ -26,6 +26,7 @@ const { weekStartOf, weekDates, BLOCKS, DAY_KEYS, normalizeBlocks } = require(".
 const {
   normalizeCompliance, compliancePipeline, committedHours, hoursCapOf, PIPELINE_DAYS,
 } = require("./compliance");
+const { normalizeOnCosts, costMultiplier, summarize, shiftMargin } = require("./margin");
 
 // The single venue this build supports so far (see decisions log — multi-
 // tenant support is a later step). The dashboard is scoped to this tenant.
@@ -563,6 +564,140 @@ app.post("/api/sites/:id/active", requireDashboardKey, async (req, res) => {
     }
     console.error("[sites] failed to change active state:", err);
     res.status(500).json({ error: "Failed to update site." });
+  }
+});
+
+/**
+ * Bill rates, sign-off and margin (docs/agencymodelshape.md step 6).
+ *
+ * POST /api/sites/:id/bill-rates
+ * Body: { billRates: { housekeeping: 42.5, default: 39 } }
+ *
+ * `default` is the fallback for a role the rate card doesn't name. A role with
+ * neither is reported as unbillable rather than billed at zero, which would look
+ * like a loss-making placement in the margin report.
+ */
+app.post("/api/sites/:id/bill-rates", requireDashboardKey, async (req, res) => {
+  try {
+    const site = await siteStore.findById(req.params.id);
+    if (!site || site.tenantId !== DASHBOARD_TENANT_ID) {
+      return res.status(404).json({ error: "No site with that id." });
+    }
+    const billRates = {};
+    for (const [role, rate] of Object.entries((req.body || {}).billRates || {})) {
+      const n = Number(rate);
+      const key = String(role).trim().toLowerCase();
+      if (key && Number.isFinite(n) && n >= 0) billRates[key] = n;
+    }
+    const updated = await siteStore.upsert(site.siteId, { billRates });
+    res.json({ ok: true, site: updated });
+  } catch (err) {
+    console.error("[margin] failed to save bill rates:", err);
+    res.status(500).json({ error: "Failed to save bill rates." });
+  }
+});
+
+/**
+ * POST /api/settings/on-costs — casual loading, super, payroll tax, workers' comp.
+ *
+ * Starting points the operator confirms, exactly like the penalty presets. Not
+ * advice, and not award interpretation. Order of application matters and is
+ * handled in margin.js: loading is part of the wage, so the rest is levied on the
+ * loaded wage, not the base.
+ */
+app.post("/api/settings/on-costs", requireDashboardKey, async (req, res) => {
+  try {
+    const onCosts = normalizeOnCosts(req.body || {});
+    await tenantStore.updateSettings(DASHBOARD_TENANT_ID, { onCosts });
+    res.json({ ok: true, onCosts, costMultiplier: costMultiplier(onCosts) });
+  } catch (err) {
+    console.error("[margin] failed to save on-costs:", err);
+    res.status(500).json({ error: "Failed to save on-costs." });
+  }
+});
+
+/**
+ * POST /api/shifts/:id/signoff — the operator signing off on the client's behalf.
+ * Body: { approve: boolean, note?: string }
+ *
+ * Exists because a phone call still happens: the supervisor rings, the operator
+ * records it here, and the written trail is what wins an invoice dispute.
+ */
+app.post("/api/shifts/:id/signoff", requireDashboardKey, async (req, res) => {
+  try {
+    const approve = Boolean(req.body?.approve);
+    const note = req.body?.note ? String(req.body.note).trim() : null;
+    const updated = await shiftsStore.signOffShift(req.params.id, {
+      approve,
+      by: `operator:${req.body?.by ? String(req.body.by).trim() : "dashboard"}`,
+      note,
+    });
+    res.json({ ok: true, shift: updated });
+  } catch (err) {
+    if (err.message === "SHIFT_NOT_FOUND") {
+      return res.status(404).json({ error: "No shift with that id." });
+    }
+    console.error("[signoff] failed:", err);
+    res.status(500).json({ error: "Failed to sign off that shift." });
+  }
+});
+
+/**
+ * GET /api/reports/margin?from=&to= — bill less pay less on-costs, split by lane.
+ *
+ * **Blending planned and urgent hides both.** Urgent skews to nights and
+ * weekends, so billing it flat while paying penalties loses money; reported
+ * apart, the urgent column becomes a sales asset you can price against.
+ */
+app.get("/api/reports/margin", requireDashboardKey, async (req, res) => {
+  try {
+    const from = req.query.from ? new Date(`${String(req.query.from)}T00:00:00`) : new Date(Date.now() - 14 * 24 * 60 * 60 * 1000);
+    const to = req.query.to ? new Date(`${String(req.query.to)}T23:59:59`) : new Date();
+    if (Number.isNaN(from.getTime()) || Number.isNaN(to.getTime())) {
+      return res.status(400).json({ error: "from and to must be YYYY-MM-DD." });
+    }
+
+    const [all, tenant] = await Promise.all([
+      shiftsStore.listRecentByTenant(DASHBOARD_TENANT_ID, from.toISOString()),
+      tenantStore.findById(DASHBOARD_TENANT_ID),
+    ]);
+    const onCosts = normalizeOnCosts(tenant && tenant.onCosts);
+
+    const worked = all.filter(
+      (s) =>
+        s.clockOut && !s.clockOut.denied &&
+        new Date(s.clockIn.time) >= from && new Date(s.clockIn.time) <= to
+    );
+
+    // Only approved hours are invoiceable. Unapproved ones are reported
+    // separately rather than counted, so a margin figure can't be inflated by
+    // hours a client hasn't agreed to yet.
+    const approved = worked.filter((s) => s.approvedAt);
+    const summary = summarize(approved, onCosts);
+
+    const perSite = {};
+    for (const shift of approved) {
+      const key = shift.siteId || "no-site";
+      if (!perSite[key]) perSite[key] = { siteId: key, siteName: shift.siteName || null, hours: 0, bill: 0, margin: 0 };
+      const m = shiftMargin(shift, onCosts);
+      perSite[key].hours = Math.round((perSite[key].hours + m.hours) * 100) / 100;
+      perSite[key].bill = Math.round((perSite[key].bill + m.bill) * 100) / 100;
+      perSite[key].margin = Math.round((perSite[key].margin + m.margin) * 100) / 100;
+    }
+
+    res.json({
+      from: from.toISOString(),
+      to: to.toISOString(),
+      onCosts,
+      costMultiplier: costMultiplier(onCosts),
+      ...summary,
+      perSite: Object.values(perSite).sort((a, b) => b.bill - a.bill),
+      awaitingSignoff: worked.filter((s) => !s.approvedAt && !s.queriedAt).length,
+      queried: worked.filter((s) => s.queriedAt).length,
+    });
+  } catch (err) {
+    console.error("[margin] failed to build report:", err);
+    res.status(500).json({ error: "Failed to build the margin report." });
   }
 });
 

@@ -3,6 +3,7 @@
 const { sendText } = require("./whatsapp");
 const { parseRequest, MISSING_PROMPT } = require("./requestParser");
 const { laneFor, seatsRemaining } = require("./requestsStore");
+const { looksLikeSignoffReply, handleSignoffReply } = require("./signoffHandler");
 
 /**
  * Client intake over chat — build order step 4 of docs/agencymodelshape.md.
@@ -109,6 +110,14 @@ async function handleClientMessage(from, sites, body, deps, sendOpts = {}, now =
 
   if (STATUS_RE.test(body)) {
     await sendStatus(from, tenantId, deps, sendOpts);
+    return true;
+  }
+
+  // Signing off finished shifts. Checked before the order parser, and only when
+  // there is no draft on the table — otherwise "ok" confirming an order would be
+  // read as approving a timesheet.
+  if (!draft && looksLikeSignoffReply(body)) {
+    await handleSignoffReply(from, sites, body, deps, sendOpts, now);
     return true;
   }
 

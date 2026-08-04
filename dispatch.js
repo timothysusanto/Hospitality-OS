@@ -8,6 +8,7 @@ const { canWorkRole } = require("./store");
 const { slotWindow, windowsOverlap, mondayOf } = require("./rosterStore");
 const { sweepWeeklyPings } = require("./availabilityCapture");
 const { filterPlaceable, checkPlacement, describeBlock } = require("./compliance");
+const { sweepSignoffs } = require("./signoffHandler");
 
 /**
  * The blast engine — build order step 2 of docs/agencymodelshape.md.
@@ -442,6 +443,8 @@ async function acceptOffer(offer, staff, deps, sendOpts = {}) {
   await rosterStore.setAssignment(request.tenantId, dateIso, offer.phone, {
     slot: `${hhmm(start)}-${hhmm(end)}`,
     siteId: request.siteId,
+    // Carried so clock-in can price the shift against the site's rate card.
+    role: request.role || null,
   });
 
   // The last seat just went — nobody else can accept, so stop their clocks.
@@ -596,6 +599,12 @@ async function tick(tenantId, deps, sendOpts = {}, now = new Date()) {
     return { asked: 0, chased: 0 };
   });
 
+  // Ask the site to sign off finished shifts. Also idempotent.
+  const signoffs = await sweepSignoffs(tenantId, deps, sendOpts, now).catch((err) => {
+    console.error("[signoff] sweep failed:", err);
+    return { asked: 0, groups: 0 };
+  });
+
   const open = await requestsStore.listOpen(tenantId);
   for (const request of open) {
     try {
@@ -609,6 +618,7 @@ async function tick(tenantId, deps, sendOpts = {}, now = new Date()) {
     backfilled: backfilled.length,
     asked: pinged.asked,
     chased: pinged.chased,
+    signoffsRequested: signoffs.groups,
   };
 }
 

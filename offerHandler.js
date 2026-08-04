@@ -109,10 +109,12 @@ async function handleOfferReply(from, staff, body, deps, sendOpts = {}) {
     return true;
   }
 
-  // Lost the race, or the request was pulled. Say which — "already taken" and
-  // "cancelled" mean different things to someone who was about to travel.
-  const message =
-    result.reason === "ALREADY_FULL" || result.reason === "REQUEST_CLOSED"
+  // Lost the race, blocked by the compliance gate, or the request was pulled.
+  // Say which — "already taken", "your RSA lapsed" and "cancelled" mean very
+  // different things to someone who was about to travel across the city.
+  const message = result.message
+    ? result.message
+    : result.reason === "ALREADY_FULL" || result.reason === "REQUEST_CLOSED"
       ? `Sorry — ${describeOffer(request)} has just been taken. You were quick, so you'll get the next one.`
       : "Couldn't lock that in just now — please try again in a moment.";
   await sendText(from, message, sendOpts);

@@ -23,6 +23,9 @@ const { verify: verifyLink, isConfigured: linksConfigured } = require("./signedL
 const { gridModel, nextWeekStart } = require("./availabilityCapture");
 const { normalizeDays, declaredCellCount, isSubmitted } = require("./availabilityStore");
 const { weekStartOf, weekDates, BLOCKS, DAY_KEYS, normalizeBlocks } = require("./availabilityBlocks");
+const {
+  normalizeCompliance, compliancePipeline, committedHours, hoursCapOf, PIPELINE_DAYS,
+} = require("./compliance");
 
 // The single venue this build supports so far (see decisions log — multi-
 // tenant support is a later step). The dashboard is scoped to this tenant.
@@ -560,6 +563,127 @@ app.post("/api/sites/:id/active", requireDashboardKey, async (req, res) => {
     }
     console.error("[sites] failed to change active state:", err);
     res.status(500).json({ error: "Failed to update site." });
+  }
+});
+
+/**
+ * Compliance (docs/agencymodelshape.md step 5). **A gate, not a display panel** —
+ * these endpoints maintain and report on the same functions dispatch.js uses to
+ * block a placement, so the report can never disagree with what actually blocks.
+ *
+ * POST /api/staff/:phone/compliance
+ * Body: { compliance: { rsa: {expiresAt, ref?}, visa: {expiresAt, hoursCapPerFortnight?}, ... } }
+ *
+ * Replaces the whole map, so clearing a document that was recorded in error is a
+ * normal edit. A document with no readable expiry or reference is dropped rather
+ * than stored as an empty object that looks like a held document.
+ */
+app.post("/api/staff/:phone/compliance", requireDashboardKey, async (req, res) => {
+  try {
+    const phone = String(req.params.phone).replace(/[^\d]/g, "");
+    const staff = await staffStore.findByPhone(phone);
+    if (!staff || staff.tenantId !== DASHBOARD_TENANT_ID) {
+      return res.status(404).json({ error: "No staff member with that number." });
+    }
+    const compliance = normalizeCompliance((req.body || {}).compliance);
+    await staffStore.upsert({ phone, tenantId: DASHBOARD_TENANT_ID, compliance });
+    res.json({ ok: true, compliance });
+  } catch (err) {
+    console.error("[compliance] failed to save:", err);
+    res.status(500).json({ error: "Failed to save compliance." });
+  }
+});
+
+/**
+ * GET /api/compliance — the 30-day pipeline: who lapses soon, and how many
+ * placements that endangers. Blocked-now first, then soonest to lapse.
+ */
+app.get("/api/compliance", requireDashboardKey, async (req, res) => {
+  try {
+    const days = Number(req.query.days) > 0 ? Math.min(365, Number(req.query.days)) : PIPELINE_DAYS;
+    const [rows, tenant] = await Promise.all([
+      compliancePipeline(DASHBOARD_TENANT_ID, deps, new Date(), days),
+      tenantStore.findById(DASHBOARD_TENANT_ID),
+    ]);
+    res.json({
+      days,
+      rows,
+      blockedNow: rows.filter((r) => r.blockedNow).length,
+      endangeredPlacements: rows.reduce((sum, r) => sum + r.endangeredPlacements, 0),
+      rules: (tenant && tenant.complianceRules) || null,
+    });
+  } catch (err) {
+    console.error("[compliance] failed to build pipeline:", err);
+    res.status(500).json({ error: "Failed to load the compliance pipeline." });
+  }
+});
+
+/**
+ * POST /api/settings/compliance — which documents a role requires.
+ * Body: { requiredForAll: ["police"], requiredByRole: { "food-and-beverage": ["rsa"] } }
+ *
+ * Only the agency knows what its clients demand, so this is configuration rather
+ * than a built-in list. Leaving it unset still blocks anybody holding an expired
+ * document — that rule needs no setup to be correct.
+ */
+app.post("/api/settings/compliance", requireDashboardKey, async (req, res) => {
+  try {
+    const body = req.body || {};
+    const key = (k) => String(k).trim().toLowerCase().replace(/[^a-z0-9_-]/g, "");
+    const list = (v) => (Array.isArray(v) ? [...new Set(v.map(key).filter(Boolean))] : []);
+
+    const requiredByRole = {};
+    if (body.requiredByRole && typeof body.requiredByRole === "object") {
+      for (const [role, docs] of Object.entries(body.requiredByRole)) {
+        const cleanRole = String(role).trim().toLowerCase();
+        const cleanDocs = list(docs);
+        if (cleanRole && cleanDocs.length) requiredByRole[cleanRole] = cleanDocs;
+      }
+    }
+    const complianceRules = { requiredForAll: list(body.requiredForAll), requiredByRole };
+    await tenantStore.updateSettings(DASHBOARD_TENANT_ID, { complianceRules });
+    res.json({ ok: true, complianceRules });
+  } catch (err) {
+    console.error("[compliance] failed to save rules:", err);
+    res.status(500).json({ error: "Failed to save compliance rules." });
+  }
+});
+
+/**
+ * GET /api/hours?phone=… — the fortnight hours cap, per person, across all
+ * sites. Student-visa exposure is carried by the agency, so this counts hours
+ * everywhere rather than per client.
+ */
+app.get("/api/hours", requireDashboardKey, async (req, res) => {
+  try {
+    const until = req.query.until ? new Date(String(req.query.until)) : new Date();
+    if (Number.isNaN(until.getTime())) {
+      return res.status(400).json({ error: "until must be a valid date-time." });
+    }
+    const staff = req.query.phone
+      ? [await staffStore.findByPhone(String(req.query.phone).replace(/[^\d]/g, ""))].filter(Boolean)
+      : await staffStore.listByTenant(DASHBOARD_TENANT_ID);
+
+    const rows = [];
+    for (const person of staff) {
+      if (person.tenantId !== DASHBOARD_TENANT_ID) continue;
+      const cap = hoursCapOf(person);
+      const committed = await committedHours(DASHBOARD_TENANT_ID, person.phone, until, deps);
+      // Everyone gets a row; a cap only some people have.
+      rows.push({
+        phone: person.phone,
+        name: person.name,
+        committed,
+        cap,
+        remaining: cap != null ? Math.round((cap - committed) * 100) / 100 : null,
+        overCap: cap != null && committed > cap,
+      });
+    }
+    rows.sort((a, b) => (b.cap != null) - (a.cap != null) || b.committed - a.committed);
+    res.json({ until: until.toISOString(), fortnightEndingAt: until.toISOString(), rows });
+  } catch (err) {
+    console.error("[hours] failed to compute:", err);
+    res.status(500).json({ error: "Failed to compute hours." });
   }
 });
 

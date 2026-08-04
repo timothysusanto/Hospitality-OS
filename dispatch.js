@@ -7,6 +7,7 @@ const { rankStaff } = require("./reliability");
 const { canWorkRole } = require("./store");
 const { slotWindow, windowsOverlap, mondayOf } = require("./rosterStore");
 const { sweepWeeklyPings } = require("./availabilityCapture");
+const { filterPlaceable, checkPlacement, describeBlock } = require("./compliance");
 
 /**
  * The blast engine — build order step 2 of docs/agencymodelshape.md.
@@ -174,6 +175,26 @@ async function audienceFor(tier, request, deps) {
   return null;
 }
 
+/**
+ * The tenant's compliance rules, or null.
+ *
+ * A failed lookup returns null rather than throwing, which leaves rule 1 —
+ * anybody holding an expired document is blocked — fully in force. That rule
+ * needs no configuration to be correct, which is exactly why it is separate
+ * from the role requirements this function fetches.
+ */
+async function complianceRulesFor(tenantId, deps) {
+  const { tenantStore } = deps;
+  if (!tenantStore) return null;
+  try {
+    const tenant = await tenantStore.findById(tenantId);
+    return (tenant && tenant.complianceRules) || null;
+  } catch (err) {
+    console.error("[compliance] couldn't read rules:", err.message);
+    return null;
+  }
+}
+
 function offerText(request, wave, plan) {
   const lines = [
     `${request.role ? request.role : "Shift"} — ${request.siteName || request.siteId}`,
@@ -209,13 +230,20 @@ async function sendWave(request, waveNumber, deps, sendOpts = {}) {
     offersStore.phonesOfferedFor(request.requestId),
   ]);
 
-  const candidates = audience.filter(
+  const free = audience.filter(
     (s) => !booked.has(s.phone) && !alreadyOffered.has(s.phone)
   );
+
+  // The compliance gate, applied to every tier including the urgent lane's
+  // "everyone". Being short-staffed is never a reason to place somebody the
+  // agency isn't allowed to place.
+  const rules = await complianceRulesFor(request.tenantId, deps);
+  const { allowed: candidates } = await filterPlaceable(free, request, deps, rules);
+
   if (!candidates.length) {
     console.log(
       `[dispatch] ${request.ref} wave ${waveNumber} (${plan.tier}): nobody left after ` +
-        `booked(${booked.size}) and already-offered(${alreadyOffered.size}) filters`
+        `booked(${booked.size}), already-offered(${alreadyOffered.size}) and compliance filters`
     );
     return 0;
   }
@@ -357,6 +385,24 @@ async function advance(request, deps, sendOpts = {}, now = new Date()) {
  */
 async function acceptOffer(offer, staff, deps, sendOpts = {}) {
   const { requestsStore, offersStore, staffStore, rosterStore } = deps;
+
+  // Re-check the gate at claim time. A planned blast's accept window is two
+  // hours; a document can lapse inside it, and the hours cap can be used up by
+  // another shift accepted in the meantime. Checked before the seat is taken so
+  // a blocked person never briefly holds one.
+  const pending = await requestsStore.findById(offer.requestId);
+  if (pending) {
+    const rules = await complianceRulesFor(pending.tenantId, deps);
+    const gate = await checkPlacement(staff, pending, deps, rules);
+    if (!gate.ok) {
+      await offersStore.respond(offer.offerId, "declined");
+      console.warn(
+        `[compliance] ${staff.phone} blocked from ${pending.ref} at accept: ` +
+          `${gate.reason} (${(gate.details || []).join("; ")})`
+      );
+      return { ok: false, reason: gate.reason, request: pending, message: describeBlock(gate) };
+    }
+  }
 
   const claim = await requestsStore.claimSeat(offer.requestId);
   if (!claim.claimed) {

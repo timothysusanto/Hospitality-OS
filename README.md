@@ -144,7 +144,7 @@ labour-hire agency supplying casual staff to many hotels.
 | 2 | Requests, offers and the blast engine | ✅ |
 | 3 | Weekly availability and the free-today pool | ✅ |
 | 4 | Client intake over chat | ✅ |
-| 5 | Compliance gate and hours cap | next |
+| 5 | Compliance gate and hours cap | ✅ |
 | 6 | Timesheet sign-off, bill rates, margin | |
 | 7 | Reporting | |
 
@@ -247,7 +247,35 @@ Phone calls aren't banned, they're out-competed. When one happens, the operator
 types it into the dashboard against the requester's number — same collection,
 same fields. A written trail of what was ordered is what wins invoice disputes.
 
-Still to come: no compliance gate until step 5.
+**Step 5** added the compliance gate and the fortnight hours cap. **A gate, not a
+display panel** — a dashboard showing an expired RSA in red while the person
+keeps getting offered bar shifts hasn't solved anything. Two rules:
+
+1. **A document that exists and has expired blocks the person.** No configuration
+   needed: if you're tracking somebody's police check and it lapsed, placing them
+   is your liability. Expiry is measured against the **end** of the shift, since
+   somebody whose visa expires at noon can't lawfully work until 3pm.
+2. **A document a role requires and the person doesn't hold blocks that role.**
+   Configured per tenant via `POST /api/settings/compliance` — only you know your
+   clients demand an RSA for bar work. Leaving it unset still leaves rule 1 in
+   force.
+
+The gate runs twice: when building each wave, and again the moment somebody
+accepts. A planned lane's accept window is two hours, and a document can lapse
+inside it. Nothing briefly holds a seat.
+
+**The fortnight cap is checked as a worst case.** Set
+`compliance.visa.hoursCapPerFortnight` and hours are counted across *all* sites,
+from worked shifts and future bookings alike. Checking only the 14 days ending at
+the shift is leaky — with a 24h cap and 16h booked, accepting the 13th passes,
+then the 12th also passes because the 13th falls outside *its* window: four days,
+32 hours, cap intact. So every 14-day window containing the shift is evaluated
+and the worst one blocks. No order of accepting shifts can get somebody over.
+
+Reports come from the same functions the gate uses, so they can never disagree
+with what actually blocks: `GET /api/compliance` for the 30-day pipeline (who
+lapses, and how many placements that endangers) and `GET /api/hours` for
+committed hours per person.
 
 ## Security notes (do not skip)
 

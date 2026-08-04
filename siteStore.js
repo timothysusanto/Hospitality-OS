@@ -123,6 +123,32 @@ class InMemorySiteStore {
     site.active = Boolean(active);
     return site;
   }
+
+  /**
+   * Which sites a phone number is allowed to order staff for.
+   *
+   * **Only registered numbers can order.** This is the gate for the whole client
+   * intake flow (docs/agencymodelshape.md step 4) — an unknown number gets asked
+   * to have their manager register it, never a shift.
+   *
+   * Returns every matching site, because a regional manager legitimately orders
+   * for several buildings and the parser needs to know which ones to consider.
+   */
+  async findByRequesterPhone(tenantId, phone) {
+    return [...this._sites.values()].filter(
+      (s) =>
+        s.tenantId === tenantId &&
+        s.active &&
+        (s.requesters || []).some((r) => r && r.phone === phone)
+    );
+  }
+
+  async setRequesters(siteId, requesters) {
+    const site = this._sites.get(siteId);
+    if (!site) throw new Error("SITE_NOT_FOUND");
+    site.requesters = normalizeRequesters(requesters);
+    return site;
+  }
 }
 
 /**
@@ -174,6 +200,41 @@ class FirestoreSiteStore {
     await ref.update({ active: Boolean(active) });
     return normalizeSite(siteId, { ...doc.data(), active: Boolean(active) });
   }
+
+  /**
+   * See the in-memory twin. Filtered in JS rather than with array-contains,
+   * because requesters are objects and Firestore can only match a whole element
+   * exactly — the name would have to be identical too.
+   */
+  async findByRequesterPhone(tenantId, phone) {
+    const snap = await this.collection.where("tenantId", "==", tenantId).get();
+    return snap.docs
+      .map((doc) => normalizeSite(doc.id, doc.data()))
+      .filter((s) => s.active && (s.requesters || []).some((r) => r && r.phone === phone));
+  }
+
+  async setRequesters(siteId, requesters) {
+    const ref = this.collection.doc(siteId);
+    const doc = await ref.get();
+    if (!doc.exists) throw new Error("SITE_NOT_FOUND");
+    const clean = normalizeRequesters(requesters);
+    await ref.update({ requesters: clean });
+    return normalizeSite(siteId, { ...doc.data(), requesters: clean });
+  }
+}
+
+/** Digits only, deduped — a phone number is the identity here, so it must be exact. */
+function normalizeRequesters(raw) {
+  if (!Array.isArray(raw)) return [];
+  const seen = new Set();
+  const out = [];
+  for (const entry of raw) {
+    const phone = String((entry && entry.phone) || "").replace(/[^\d]/g, "");
+    if (!phone || seen.has(phone)) continue;
+    seen.add(phone);
+    out.push({ phone, name: entry && entry.name ? String(entry.name).trim() : null });
+  }
+  return out;
 }
 
 function compareSites(a, b) {
@@ -195,6 +256,7 @@ module.exports = {
   FirestoreSiteStore,
   normalizeSite,
   normalizeGeofence,
+  normalizeRequesters,
   slugifySiteId,
   MIN_RADIUS_METERS,
   MAX_RADIUS_METERS,

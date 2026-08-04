@@ -53,6 +53,9 @@ console.log(`[startup] data backend: ${backend}`);
  * loops don't both blast the same request.
  */
 const dispatcher = createDispatcher(DASHBOARD_TENANT_ID, deps, {});
+// The intake flow kicks a pass the moment a hotel confirms an order, rather than
+// letting a 5:40am request wait up to a tick interval.
+deps.dispatcher = dispatcher;
 if (process.env.DISPATCH_DISABLED === "1") {
   console.warn("[startup] DISPATCH_DISABLED=1 — the blast engine is NOT running");
 } else {
@@ -509,6 +512,35 @@ app.post("/api/sites", requireDashboardKey, async (req, res) => {
   } catch (err) {
     console.error("[sites] failed to save:", err);
     res.status(500).json({ error: "Failed to save site." });
+  }
+});
+
+/**
+ * POST /api/sites/:id/requesters — who at this hotel may order staff.
+ * Body: { requesters: [{ phone, name }] }
+ *
+ * **Only registered numbers can order** (docs/agencymodelshape.md step 4). This
+ * list is the gate: an unknown number that messages in gets asked to have its
+ * manager register it, never a shift. Replaces the whole list, so removing
+ * somebody who has left is a normal edit rather than a special case.
+ */
+app.post("/api/sites/:id/requesters", requireDashboardKey, async (req, res) => {
+  try {
+    const site = await siteStore.findById(req.params.id);
+    if (!site || site.tenantId !== DASHBOARD_TENANT_ID) {
+      return res.status(404).json({ error: "No site with that id." });
+    }
+    if (!Array.isArray(req.body?.requesters)) {
+      return res.status(400).json({ error: "requesters must be an array of {phone, name}." });
+    }
+    const updated = await siteStore.setRequesters(site.siteId, req.body.requesters);
+    res.json({ ok: true, site: updated });
+  } catch (err) {
+    if (err.message === "SITE_NOT_FOUND") {
+      return res.status(404).json({ error: "No site with that id." });
+    }
+    console.error("[sites] failed to set requesters:", err);
+    res.status(500).json({ error: "Failed to update requesters." });
   }
 });
 

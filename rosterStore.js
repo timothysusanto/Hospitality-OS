@@ -105,7 +105,12 @@ function normalizeAssignment(raw) {
   if (typeof raw !== "object") return null;
   const slot = canonicalSlot(raw.slot);
   if (!slot) return null;
-  return { slot, siteId: raw.siteId ? String(raw.siteId) : null };
+  const assignment = { slot, siteId: raw.siteId ? String(raw.siteId) : null };
+  // The job being done, when it's known — set when an offer is accepted from a
+  // request that named a role. Clock-in reads it to pick the site's bill rate,
+  // so a shift can be priced without guessing from the person's department.
+  if (raw.role) assignment.role = String(raw.role).trim().toLowerCase();
+  return assignment;
 }
 
 /**

@@ -23,6 +23,19 @@
  * tenant-geofence fallback where there genuinely is no site document.
  */
 
+/**
+ * A rate, or null for "we don't have one".
+ *
+ * Not `Number.isFinite(Number(x))`: `Number(null)` and `Number("")` are both 0,
+ * which would store an absent rate as a real rate of zero — a shift that then
+ * looks like free labour in a margin report instead of one nobody has priced.
+ */
+function rateOrNull(value) {
+  if (value === null || value === undefined || value === "") return null;
+  const n = Number(value);
+  return Number.isFinite(n) && n >= 0 ? n : null;
+}
+
 class InMemoryShiftsStore {
   constructor() {
     /** @type {Map<string, object>} keyed by shiftId */
@@ -30,7 +43,7 @@ class InMemoryShiftsStore {
     this._nextId = 1;
   }
 
-  async openShift({ tenantId, staffPhone, department, siteId, siteName, clockIn }) {
+  async openShift({ tenantId, staffPhone, department, siteId, siteName, role, payRate, billRate, lane, requestId, clockIn }) {
     const shiftId = `shift_${this._nextId++}`;
     this._shifts.set(shiftId, {
       shiftId,
@@ -39,6 +52,18 @@ class InMemoryShiftsStore {
       department,
       siteId: siteId || null,
       siteName: siteName || null,
+      role: role || null,
+      // Stamped, never looked up later: rate cards change, and an invoice from
+      // three months ago must not silently reprice when somebody edits a site.
+      payRate: rateOrNull(payRate),
+      billRate: rateOrNull(billRate),
+      lane: lane || null,
+      requestId: requestId || null,
+      approvedBy: null,
+      approvedAt: null,
+      queriedAt: null,
+      queryNote: null,
+      signoffAskedAt: null,
       clockIn,
       clockOut: null,
       breaks: [],
@@ -125,6 +150,39 @@ class InMemoryShiftsStore {
   }
 
   /**
+   * One-tap sign-off from the supervisor's phone (docs/agencymodelshape.md
+   * step 6). `approve` records who and when; a query records the note instead
+   * and leaves the shift unapproved so it shows up in the operator's worklist
+   * rather than on an invoice.
+   *
+   * Idempotent: a second Approve on an already-approved shift is a no-op rather
+   * than a second audit entry with a later timestamp.
+   */
+  async signOffShift(shiftId, { approve, by, note }) {
+    const shift = this._shifts.get(shiftId);
+    if (!shift) throw new Error("SHIFT_NOT_FOUND");
+    if (shift.approvedAt) return shift;
+    if (approve) {
+      shift.approvedBy = by || null;
+      shift.approvedAt = new Date().toISOString();
+      shift.queriedAt = null;
+      shift.queryNote = null;
+    } else {
+      shift.queriedAt = new Date().toISOString();
+      shift.queryNote = note || null;
+    }
+    return shift;
+  }
+
+  /** Notes that the sign-off request went out, so it isn't sent every tick. */
+  async markSignoffAsked(shiftId) {
+    const shift = this._shifts.get(shiftId);
+    if (!shift) throw new Error("SHIFT_NOT_FOUND");
+    shift.signoffAskedAt = new Date().toISOString();
+    return shift;
+  }
+
+  /**
    * Timesheet amendment — audit-trail style: the original clockIn/clockOut/
    * breaks are never touched; corrections live in `amended` and every
    * consumer (dashboard, reports) uses amended values when present, while
@@ -155,13 +213,25 @@ class FirestoreShiftsStore {
     this.collection = db.collection("shifts");
   }
 
-  async openShift({ tenantId, staffPhone, department, siteId, siteName, clockIn }) {
+  async openShift({ tenantId, staffPhone, department, siteId, siteName, role, payRate, billRate, lane, requestId, clockIn }) {
     const ref = await this.collection.add({
       tenantId,
       staffPhone,
       department,
       siteId: siteId || null,
       siteName: siteName || null,
+      role: role || null,
+      // Stamped, never looked up later: rate cards change, and an invoice from
+      // three months ago must not silently reprice when somebody edits a site.
+      payRate: rateOrNull(payRate),
+      billRate: rateOrNull(billRate),
+      lane: lane || null,
+      requestId: requestId || null,
+      approvedBy: null,
+      approvedAt: null,
+      queriedAt: null,
+      queryNote: null,
+      signoffAskedAt: null,
       clockIn,
       clockOut: null,
       breaks: [],
@@ -255,6 +325,31 @@ class FirestoreShiftsStore {
       const all = await this.listByTenant(tenantId);
       return all.filter((s) => s.clockIn && s.clockIn.time >= sinceIso);
     }
+  }
+
+  /**
+   * One-tap sign-off — see the in-memory twin. Transactional so two taps from
+   * two supervisors can't both write an approval.
+   */
+  async signOffShift(shiftId, { approve, by, note }) {
+    const docRef = this.collection.doc(shiftId);
+    return this.db.runTransaction(async (tx) => {
+      const doc = await tx.get(docRef);
+      if (!doc.exists) throw new Error("SHIFT_NOT_FOUND");
+      const shift = { shiftId, ...doc.data() };
+      if (shift.approvedAt) return shift;
+      const patch = approve
+        ? { approvedBy: by || null, approvedAt: new Date().toISOString(), queriedAt: null, queryNote: null }
+        : { queriedAt: new Date().toISOString(), queryNote: note || null };
+      tx.update(docRef, patch);
+      return { ...shift, ...patch };
+    });
+  }
+
+  async markSignoffAsked(shiftId) {
+    await this.collection.doc(shiftId).update({ signoffAskedAt: new Date().toISOString() });
+    const doc = await this.collection.doc(shiftId).get();
+    return { shiftId, ...doc.data() };
   }
 
   /** Timesheet amendment — see the in-memory twin for semantics. */

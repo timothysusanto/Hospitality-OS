@@ -145,8 +145,8 @@ labour-hire agency supplying casual staff to many hotels.
 | 3 | Weekly availability and the free-today pool | ✅ |
 | 4 | Client intake over chat | ✅ |
 | 5 | Compliance gate and hours cap | ✅ |
-| 6 | Timesheet sign-off, bill rates, margin | |
-| 7 | Reporting | |
+| 6 | Timesheet sign-off, bill rates, margin | ✅ |
+| 7 | Reporting | next |
 
 **Step 1** put one geofence per building in a `sites` collection, so a clock-in
 is checked against the site on that person's rostered shift instead of one
@@ -276,6 +276,47 @@ Reports come from the same functions the gate uses, so they can never disagree
 with what actually blocks: `GET /api/compliance` for the 30-day pipeline (who
 lapses, and how many placements that endangers) and `GET /api/hours` for
 committed hours per person.
+
+**Step 6** added bill rates, one-tap sign-off and the margin report.
+
+```
+→  Shift complete — Hilton Sydney, Mon 10 Aug.
+   · Maria — 8.0 hrs
+   · Ahmed — 8.0 hrs
+   16.0 hrs total.
+   Reply APPROVE to sign off, or QUERY plus a note if something's wrong.
+←  approve
+→  Signed off — 16.0 hrs. This goes on your 10 Aug invoice.
+```
+
+Set a rate card per site with `POST /api/sites/:id/bill-rates`
+(`{housekeeping: 45, default: 40}`) and your on-costs once with
+`POST /api/settings/on-costs`.
+
+**Approval is what makes an hour billable.** An unapproved shift is a worklist
+item, not an invoice line, and the margin report counts only approved hours —
+so the number can't be inflated by hours a client hasn't agreed to. A queried
+shift is held off the invoice with its note kept. Out-of-radius clock-ins are
+never sent for client sign-off; that's a manager's call first.
+
+**Pay rates are never visible to the site.** If a hotel negotiates directly with
+a casual the margin model breaks quietly, so every client-facing message goes
+through one formatter that has no access to a rate or a margin — with tests
+asserting nothing leaks.
+
+Two things the margin maths gets right that are easy to get wrong:
+
+- **On-costs compound.** Casual loading is part of the wage, so super, payroll
+  tax and workers' comp are levied on the *loaded* wage. Computing them off the
+  base understates every shift — the difference between a thin margin and none.
+  A 40% gross mark-up is a loss once on-costs are counted.
+- **An absent rate is `null`, never zero.** A shift with no bill rate is reported
+  as unbillable rather than as a loss; one with no pay rate is flagged rather
+  than shown as 100% margin.
+
+`GET /api/reports/margin` splits by lane, because blending planned and urgent
+hides both — urgent skews to nights and weekends, and reported apart it becomes
+a column you can price against.
 
 ## Security notes (do not skip)
 

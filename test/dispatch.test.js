@@ -406,7 +406,11 @@ test("accepting writes the roster assignment the geofence resolves against", asy
     // This is the join between step 1 and step 2: the assignment carries the
     // site, so clock-in resolves the right building with no extra plumbing.
     const assignment = await deps.rosterStore.findAssignment("agency", "2026-08-12", phones[0]);
-    assert.deepEqual(assignment, { slot: "07:00-15:00", siteId: "hilton-sydney" });
+    // The role rides along too, so clock-in can price the shift against the
+    // site's rate card instead of guessing from the person's department.
+    assert.deepEqual(assignment, {
+      slot: "07:00-15:00", siteId: "hilton-sydney", role: "housekeeping",
+    });
   } finally {
     msg.restore();
   }

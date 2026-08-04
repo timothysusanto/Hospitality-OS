@@ -4,6 +4,7 @@ const { sendText, sendLocationRequest } = require("./whatsapp");
 const { checkGeofence } = require("./geofence");
 const { resolveSiteForClockIn, describeResolutionFailure, resolutionLabel } = require("./siteResolver");
 const { slotWindow } = require("./rosterStore");
+const { billRateFor } = require("./margin");
 
 /** Grace before a clock-in counts as late against the rostered start. */
 const LATE_AFTER_MS = 5 * 60 * 1000;
@@ -83,12 +84,19 @@ async function clockIn(from, staff, reported, deps, sendOpts) {
     return;
   }
 
+  // Price the shift now, from the rate card that applies today. Stamped rather
+  // than looked up later so an invoice can't silently reprice — see margin.js.
+  const pricing = await priceShift(from, staff, site, deps);
+
   const { shiftId } = await shiftsStore.openShift({
     tenantId: staff.tenantId,
     staffPhone: from,
     department: staff.department || null,
     siteId: site ? site.siteId : null,
     siteName: site ? site.name : null,
+    role: pricing.role,
+    payRate: pricing.payRate,
+    billRate: pricing.billRate,
     clockIn: {
       time: new Date().toISOString(),
       lat: reported.lat,
@@ -104,6 +112,48 @@ async function clockIn(from, staff, reported, deps, sendOpts) {
     `Clocked in at ${siteLabel}, ${staff.name} — have a good shift! (${shiftId})`,
     sendOpts
   );
+}
+
+/**
+ * The role and the two rates for a shift about to be opened.
+ *
+ * The role comes from the rostered assignment when there is one, because that is
+ * what the shift was actually sold as. Falling back to the person's own roles is
+ * a guess, so it's only used when nothing better exists — and a missing bill rate
+ * is left null rather than defaulted to zero, which would make an unpriced shift
+ * look like a loss-making one in the margin report.
+ */
+async function priceShift(from, staff, site, deps) {
+  const { rosterStore } = deps;
+  let role = null;
+
+  try {
+    if (rosterStore && rosterStore.findAssignment) {
+      const now = new Date();
+      const dateIso =
+        `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}` +
+        `-${String(now.getDate()).padStart(2, "0")}`;
+      const assignment = await rosterStore.findAssignment(staff.tenantId, dateIso, from);
+      if (assignment && assignment.role) role = assignment.role;
+    }
+  } catch (err) {
+    console.error("[clock] couldn't read the assignment's role:", err.message);
+  }
+
+  if (!role) {
+    const own = Array.isArray(staff.roles) && staff.roles.length ? staff.roles[0] : staff.department;
+    role = own ? String(own).trim().toLowerCase() : null;
+  }
+
+  const payRate = Number.isFinite(Number(staff.wageRate)) ? Number(staff.wageRate) : null;
+  const billRate = site ? billRateFor(site, role) : null;
+  if (site && billRate == null) {
+    console.warn(
+      `[margin] ${site.siteId} has no bill rate for "${role || "unknown role"}" — ` +
+        "this shift will show as unbillable until a rate card is set"
+    );
+  }
+  return { role, payRate, billRate };
 }
 
 /**

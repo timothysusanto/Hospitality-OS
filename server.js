@@ -27,6 +27,7 @@ const {
   normalizeCompliance, compliancePipeline, committedHours, hoursCapOf, PIPELINE_DAYS,
 } = require("./compliance");
 const { normalizeOnCosts, costMultiplier, summarize, shiftMargin } = require("./margin");
+const { agencyReport } = require("./reports");
 
 // The single venue this build supports so far (see decisions log — multi-
 // tenant support is a later step). The dashboard is scoped to this tenant.
@@ -564,6 +565,32 @@ app.post("/api/sites/:id/active", requireDashboardKey, async (req, res) => {
     }
     console.error("[sites] failed to change active state:", err);
     res.status(500).json({ error: "Failed to update site." });
+  }
+});
+
+/**
+ * GET /api/reports/agency?from=&to=&week= — every agency number in one call
+ * (docs/agencymodelshape.md step 7).
+ *
+ * Fill rate, time to fill, lost demand, reliability, response latency, margin,
+ * client hours, the free-today histogram and the supply-vs-demand grid. Every
+ * one that can split by lane does, because blending planned and urgent hides
+ * both — a planned miss is an ops failure and an urgent miss is a supply problem.
+ */
+app.get("/api/reports/agency", requireDashboardKey, async (req, res) => {
+  try {
+    const from = req.query.from ? new Date(`${String(req.query.from)}T00:00:00`) : null;
+    const to = req.query.to ? new Date(`${String(req.query.to)}T23:59:59`) : null;
+    if ((from && Number.isNaN(from.getTime())) || (to && Number.isNaN(to.getTime()))) {
+      return res.status(400).json({ error: "from and to must be YYYY-MM-DD." });
+    }
+    const weekStart = req.query.week ? weekStartOf(`${String(req.query.week)}T12:00:00`) : null;
+
+    const report = await agencyReport(DASHBOARD_TENANT_ID, { from, to, weekStart }, deps);
+    res.json(report);
+  } catch (err) {
+    console.error("[reports] failed to build the agency report:", err);
+    res.status(500).json({ error: "Failed to build the report." });
   }
 });
 

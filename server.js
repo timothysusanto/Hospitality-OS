@@ -1493,6 +1493,24 @@ app.get("/health", (_req, res) => res.json({ ok: true, service: "hospitality-os"
 
 const PORT = process.env.PORT || 3000;
 
+// ---------------------------------------------------------------------------
+// Core OS (Deskless Workforce OS) — Phase 1: rostering v2 with award-engine
+// costing, credential wallet + roster guard, payroll CSV and compliance-pack
+// exports. Mounted under /api/core so it can't collide with the existing
+// /api/roster endpoint above. Gated by the same dashboard key as everything
+// else. Uses the admin Firestore connection directly (null-safe: returns 503
+// until FIREBASE_SERVICE_ACCOUNT_JSON is set).
+const coreOSRoutes = require("./core-os-routes");
+const { getFirestoreDb } = require("./firebase");
+app.use("/api/core", requireDashboardKey, coreOSRoutes({
+  db: getFirestoreDb(),
+  tenantId: DASHBOARD_TENANT_ID,
+  sendWhatsApp: (phone, text) => sendText(phone, text),
+}));
+app.get("/roster", (_req, res) => {
+  res.sendFile(path.join(__dirname, "public", "roster.html"));
+});
+
 // Fail fast on missing configuration rather than failing weirdly later.
 const required = ["WHATSAPP_TOKEN", "WHATSAPP_PHONE_NUMBER_ID", "WHATSAPP_VERIFY_TOKEN", "META_APP_SECRET"];
 const missing = required.filter((k) => !process.env[k]);

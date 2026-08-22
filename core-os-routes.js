@@ -1,0 +1,315 @@
+/**
+ * core-os-routes.js — Core OS API: rostering, credential wallet, payroll & compliance exports
+ * Deskless Workforce OS — mounts onto the existing Express app in one line (see WIRING.md).
+ *
+ * Firestore layout (extends the existing tenants/{tenant} structure):
+ *   tenants/{t}/workers/{workerId}         { name, phone, employmentType, level, awardCode, active }
+ *   tenants/{t}/shifts/{shiftId}           { workerId, date, start, end, unpaidBreakMins, role,
+ *                                            published, createdAt, updatedAt, audit: [...] }
+ *   tenants/{t}/credentials/{credId}       { workerId, type, label, number, expiryDate,
+ *                                            fileUrl, verifiedBy, createdAt }
+ *   tenants/{t}/settings/publicHolidays    { dates: ["YYYY-MM-DD", ...] }
+ *
+ * Wire-in:
+ *   const coreOS = require("./core-os-routes");
+ *   app.use("/api", coreOS({ db, tenantId: "demo-venue", sendWhatsApp })); // sendWhatsApp optional
+ */
+
+const express = require("express");
+const { costShift, costRoster, getAward, listUnverifiedRates } = require("./award-engine");
+
+// Credential types that block rostering when expired (roster guard)
+const BLOCKING_CREDENTIALS = ["visa", "rsa", "white_card", "ndis_screening"];
+const CREDENTIAL_TYPES = {
+  visa:            { label: "Visa / right to work", blocking: true },
+  rsa:             { label: "RSA / RCG",            blocking: true },
+  white_card:      { label: "White Card",           blocking: true },
+  ndis_screening:  { label: "NDIS worker screening",blocking: true },
+  police_check:    { label: "Police check",         blocking: false },
+  fss:             { label: "Food Safety Supervisor", blocking: false },
+  first_aid:       { label: "First aid",            blocking: false },
+  drivers_licence: { label: "Driver licence",       blocking: false },
+};
+
+module.exports = function coreOS({ db, tenantId, sendWhatsApp }) {
+  const router = express.Router();
+
+  // Firestore not configured (in-memory dev mode) → fail clearly, don't crash.
+  if (!db) {
+    router.use((_req, res) => res.status(503).json({
+      error: "Core OS needs Firestore. Set FIREBASE_SERVICE_ACCOUNT_JSON (Railway → Variables) and redeploy.",
+    }));
+    return router;
+  }
+
+  const T = () => db.collection("tenants").doc(tenantId);
+
+  const getHolidays = async () => {
+    const s = await T().collection("settings").doc("publicHolidays").get();
+    return s.exists ? s.data().dates || [] : [];
+  };
+
+  // ---------- Workers ----------
+  router.get("/workers", async (req, res) => {
+    try {
+      const snap = await T().collection("workers").where("active", "!=", false).get();
+      const workers = snap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      // Attach credential status summary to each worker
+      const credsSnap = await T().collection("credentials").get();
+      const creds = credsSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      const today = new Date().toISOString().slice(0, 10);
+      const soon = addDays(today, 30);
+      for (const w of workers) {
+        const mine = creds.filter((c) => c.workerId === w.id);
+        w.credentialStatus =
+          mine.some((c) => c.expiryDate && c.expiryDate < today && (CREDENTIAL_TYPES[c.type] || {}).blocking) ? "expired"
+          : mine.some((c) => c.expiryDate && c.expiryDate < soon) ? "expiring"
+          : "ok";
+      }
+      res.json({ workers });
+    } catch (e) { err(res, e); }
+  });
+
+  router.post("/workers", async (req, res) => {
+    try {
+      const { name, phone, employmentType, level, awardCode } = req.body;
+      if (!name || !employmentType || !level) return res.status(400).json({ error: "name, employmentType and level are required" });
+      getAward(awardCode || "MA000009").levels[level] || res.status(400).json({ error: "Unknown classification level" });
+      const ref = await T().collection("workers").add({
+        name, phone: phone || null, employmentType, level,
+        awardCode: awardCode || "MA000009", active: true, createdAt: now(),
+      });
+      res.json({ id: ref.id });
+    } catch (e) { err(res, e); }
+  });
+
+  // ---------- Roster ----------
+  // GET /api/roster?weekStart=YYYY-MM-DD  → shifts + live costing + guard flags
+  router.get("/roster", async (req, res) => {
+    try {
+      const weekStart = req.query.weekStart;
+      if (!weekStart) return res.status(400).json({ error: "weekStart (YYYY-MM-DD, a Monday) is required" });
+      const weekEnd = addDays(weekStart, 6);
+      const [shiftSnap, workerSnap, holidays] = await Promise.all([
+        T().collection("shifts").where("date", ">=", weekStart).where("date", "<=", weekEnd).get(),
+        T().collection("workers").get(),
+        getHolidays(),
+      ]);
+      const shifts = shiftSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+      const workersById = {};
+      workerSnap.docs.forEach((d) => (workersById[d.id] = { id: d.id, ...d.data() }));
+      const costing = costRoster(shifts, workersById, { publicHolidays: holidays });
+      res.json({ weekStart, weekEnd, shifts, costing, unverifiedRates: listUnverifiedRates() });
+    } catch (e) { err(res, e); }
+  });
+
+  // POST /api/roster/shift — create (roster guard runs here)
+  router.post("/roster/shift", async (req, res) => {
+    try {
+      const { workerId, date, start, end, unpaidBreakMins, role } = req.body;
+      if (!workerId || !date || !start || !end) return res.status(400).json({ error: "workerId, date, start and end are required" });
+      const wDoc = await T().collection("workers").doc(workerId).get();
+      if (!wDoc.exists) return res.status(404).json({ error: "Worker not found" });
+      const worker = wDoc.data();
+
+      // Roster guard: blocking credential expired on shift date?
+      const credSnap = await T().collection("credentials").where("workerId", "==", workerId).get();
+      const warnings = [];
+      credSnap.docs.forEach((d) => {
+        const c = d.data();
+        const meta = CREDENTIAL_TYPES[c.type] || { label: c.type, blocking: false };
+        if (c.expiryDate && c.expiryDate < date) {
+          warnings.push({ severity: meta.blocking ? "blocking" : "warning", credential: meta.label, expired: c.expiryDate });
+        }
+      });
+      const hasBlocking = warnings.some((w) => w.severity === "blocking");
+      if (hasBlocking && !req.body.overrideGuard) {
+        return res.status(409).json({ error: "Credential expired for this worker on this date", warnings, overridable: true });
+      }
+
+      const shift = {
+        workerId, date, start, end,
+        unpaidBreakMins: unpaidBreakMins || 0, role: role || null, published: false,
+        createdAt: now(), updatedAt: now(),
+        audit: [{ at: now(), action: "created", by: req.body.actor || "dashboard", guardWarnings: warnings }],
+      };
+      const ref = await T().collection("shifts").add(shift);
+      const holidays = await getHolidays();
+      const cost = costShift(shift, worker, { publicHolidays: holidays });
+      res.json({ id: ref.id, cost, warnings });
+    } catch (e) { err(res, e); }
+  });
+
+  router.delete("/roster/shift/:id", async (req, res) => {
+    try {
+      const ref = T().collection("shifts").doc(req.params.id);
+      const doc = await ref.get();
+      if (!doc.exists) return res.status(404).json({ error: "Shift not found" });
+      // Audit-safe delete: keep a tombstone in the audit trail collection
+      await T().collection("shiftAudit").add({ ...doc.data(), shiftId: doc.id, deletedAt: now(), deletedBy: req.query.actor || "dashboard" });
+      await ref.delete();
+      res.json({ ok: true });
+    } catch (e) { err(res, e); }
+  });
+
+  // POST /api/roster/publish — mark week published, push each shift to WhatsApp
+  router.post("/roster/publish", async (req, res) => {
+    try {
+      const { weekStart } = req.body;
+      if (!weekStart) return res.status(400).json({ error: "weekStart is required" });
+      const weekEnd = addDays(weekStart, 6);
+      const snap = await T().collection("shifts").where("date", ">=", weekStart).where("date", "<=", weekEnd).get();
+      const workerSnap = await T().collection("workers").get();
+      const workersById = {};
+      workerSnap.docs.forEach((d) => (workersById[d.id] = { id: d.id, ...d.data() }));
+
+      const byWorker = {};
+      snap.docs.forEach((d) => {
+        const s = d.data();
+        (byWorker[s.workerId] = byWorker[s.workerId] || []).push({ id: d.id, ...s });
+      });
+
+      let sent = 0;
+      for (const [workerId, shifts] of Object.entries(byWorker)) {
+        const w = workersById[workerId];
+        await Promise.all(shifts.map((s) => T().collection("shifts").doc(s.id).update({ published: true, updatedAt: now() })));
+        if (sendWhatsApp && w && w.phone) {
+          const lines = shifts
+            .sort((a, b) => a.date.localeCompare(b.date))
+            .map((s) => `• ${fmtDay(s.date)} ${s.start}–${s.end}${s.role ? " (" + s.role + ")" : ""}`);
+          await sendWhatsApp(w.phone, `📋 Your roster ${fmtDay(weekStart)}–${fmtDay(weekEnd)}:\n${lines.join("\n")}\n\nReply YES to confirm or SWAP if you need a change.`);
+          sent++;
+        }
+      }
+      res.json({ ok: true, workersNotified: sent, workersOnRoster: Object.keys(byWorker).length });
+    } catch (e) { err(res, e); }
+  });
+
+  // ---------- Credential wallet ----------
+  router.get("/wallet/:workerId", async (req, res) => {
+    try {
+      const snap = await T().collection("credentials").where("workerId", "==", req.params.workerId).get();
+      res.json({ credentials: snap.docs.map((d) => ({ id: d.id, ...d.data() })), types: CREDENTIAL_TYPES });
+    } catch (e) { err(res, e); }
+  });
+
+  router.post("/wallet/:workerId/credential", async (req, res) => {
+    try {
+      const { type, number, expiryDate, fileUrl } = req.body;
+      if (!type || !CREDENTIAL_TYPES[type]) return res.status(400).json({ error: "Valid credential type is required", types: Object.keys(CREDENTIAL_TYPES) });
+      const ref = await T().collection("credentials").add({
+        workerId: req.params.workerId, type, label: CREDENTIAL_TYPES[type].label,
+        number: number || null, expiryDate: expiryDate || null, fileUrl: fileUrl || null,
+        verifiedBy: req.body.actor || null, createdAt: now(),
+      });
+      res.json({ id: ref.id });
+    } catch (e) { err(res, e); }
+  });
+
+  // GET /api/wallet-alerts — everything expired or expiring inside 60 days
+  router.get("/wallet-alerts", async (req, res) => {
+    try {
+      const today = new Date().toISOString().slice(0, 10);
+      const horizon = addDays(today, 60);
+      const [credSnap, workerSnap] = await Promise.all([
+        T().collection("credentials").get(), T().collection("workers").get(),
+      ]);
+      const names = {};
+      workerSnap.docs.forEach((d) => (names[d.id] = d.data().name));
+      const alerts = credSnap.docs
+        .map((d) => ({ id: d.id, ...d.data() }))
+        .filter((c) => c.expiryDate && c.expiryDate <= horizon)
+        .map((c) => ({
+          workerId: c.workerId, worker: names[c.workerId] || "Unknown",
+          credential: c.label || c.type, expiryDate: c.expiryDate,
+          status: c.expiryDate < today ? "expired" : "expiring",
+          blocking: (CREDENTIAL_TYPES[c.type] || {}).blocking || false,
+        }))
+        .sort((a, b) => a.expiryDate.localeCompare(b.expiryDate));
+      res.json({ alerts });
+    } catch (e) { err(res, e); }
+  });
+
+  // ---------- Exports ----------
+  // GET /api/export/payroll.csv?weekStart=YYYY-MM-DD — Xero-style timesheet import
+  router.get("/export/payroll.csv", async (req, res) => {
+    try {
+      const weekStart = req.query.weekStart;
+      if (!weekStart) return res.status(400).json({ error: "weekStart is required" });
+      const weekEnd = addDays(weekStart, 6);
+      const [shiftSnap, workerSnap, holidays] = await Promise.all([
+        T().collection("shifts").where("date", ">=", weekStart).where("date", "<=", weekEnd).get(),
+        T().collection("workers").get(),
+        getHolidays(),
+      ]);
+      const workersById = {};
+      workerSnap.docs.forEach((d) => (workersById[d.id] = { id: d.id, ...d.data() }));
+      const rows = [["EmployeeName", "Date", "DayType", "Start", "End", "UnpaidBreakMins", "PaidHours", "OrdinaryHours", "OTHours", "Classification", "BaseRate", "Multiplier", "LoadingAmt", "WageCost", "Super", "TotalCost"]];
+      for (const d of shiftSnap.docs) {
+        const s = d.data();
+        const w = workersById[s.workerId];
+        if (!w) continue;
+        const c = costShift(s, w, { publicHolidays: holidays });
+        rows.push([
+          w.name, s.date, c.dayType, s.start, s.end, s.unpaidBreakMins || 0,
+          c.hours, c.ordinaryHours, c.otHours, `${w.awardCode || "MA000009"}/${w.level}`,
+          c.baseRate, c.multiplier, c.loadings.reduce((t, l) => t + l.amount, 0).toFixed(2),
+          c.wageCost, c.superCost, c.totalCost,
+        ]);
+      }
+      res.setHeader("Content-Type", "text/csv");
+      res.setHeader("Content-Disposition", `attachment; filename=payroll_${weekStart}.csv`);
+      res.send(rows.map((r) => r.map(csvCell).join(",")).join("\n"));
+    } catch (e) { err(res, e); }
+  });
+
+  // GET /api/export/compliance-pack?from&to — the "keep the director out of court" export
+  router.get("/export/compliance-pack", async (req, res) => {
+    try {
+      const { from, to } = req.query;
+      if (!from || !to) return res.status(400).json({ error: "from and to (YYYY-MM-DD) are required" });
+      const [shiftSnap, auditSnap, workerSnap] = await Promise.all([
+        T().collection("shifts").where("date", ">=", from).where("date", "<=", to).get(),
+        T().collection("shiftAudit").get(),
+        T().collection("workers").get(),
+      ]);
+      const names = {};
+      workerSnap.docs.forEach((d) => (names[d.id] = d.data().name));
+      const rows = [["RecordType", "Worker", "Date", "Start", "End", "BreakMins", "Published", "AuditTrail"]];
+      shiftSnap.docs.forEach((d) => {
+        const s = d.data();
+        rows.push(["shift", names[s.workerId] || s.workerId, s.date, s.start, s.end, s.unpaidBreakMins || 0, s.published ? "yes" : "no",
+          (s.audit || []).map((a) => `${a.at} ${a.action} by ${a.by}`).join(" | ")]);
+      });
+      auditSnap.docs.forEach((d) => {
+        const s = d.data();
+        if (s.date >= from && s.date <= to)
+          rows.push(["deleted-shift", names[s.workerId] || s.workerId, s.date, s.start, s.end, s.unpaidBreakMins || 0, "-", `deleted ${s.deletedAt} by ${s.deletedBy}`]);
+      });
+      res.setHeader("Content-Type", "text/csv");
+      res.setHeader("Content-Disposition", `attachment; filename=compliance_pack_${from}_${to}.csv`);
+      res.send(rows.map((r) => r.map(csvCell).join(",")).join("\n"));
+    } catch (e) { err(res, e); }
+  });
+
+  return router;
+};
+
+// ---------- helpers ----------
+function now() { return new Date().toISOString(); }
+function addDays(dateStr, n) {
+  const d = new Date(dateStr + "T12:00:00");
+  d.setDate(d.getDate() + n);
+  return d.toISOString().slice(0, 10);
+}
+function fmtDay(dateStr) {
+  return new Date(dateStr + "T12:00:00").toLocaleDateString("en-AU", { weekday: "short", day: "numeric", month: "short" });
+}
+function csvCell(v) {
+  const s = String(v == null ? "" : v);
+  return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
+}
+function err(res, e) {
+  console.error("[core-os]", e);
+  res.status(500).json({ error: e.message });
+}

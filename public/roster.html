@@ -1,0 +1,526 @@
+<!DOCTYPE html>
+<html lang="en-AU">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<meta name="theme-color" content="#FFFFFF">
+<title>Roster — Deskless Workforce OS</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@75..100,400..800&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  /* ============ Tokens — light theme spec ============ */
+  :root{
+    --paper:#FFFFFF;         /* background */
+    --docket:#FAF7F0;        /* cards, docket */
+    --ink:#1A1A1A;           /* body text */
+    --ink-2:#555555;         /* secondary text floor */
+    --steel:#3E4C59;         /* structure, headers */
+    --steel-line:#D8DEE4;    /* hairlines */
+    --amber:#B45309;         /* heat lamp: warnings, expiring, unfilled ONLY */
+    --amber-bg:#FDF3E7;
+    --red:#B3261E;           /* expired / blocking */
+    --red-bg:#FBEAE9;
+    --green:#166534;         /* published / confirmed */
+    --green-bg:#EAF4EC;
+    --radius:10px;
+    --font-ui:'Archivo',system-ui,sans-serif;
+    --font-docket:'IBM Plex Mono',ui-monospace,monospace;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html{-webkit-text-size-adjust:100%}
+  body{
+    font-family:var(--font-ui);color:var(--ink);background:var(--paper);
+    font-size:16px;line-height:1.45;min-height:100vh;
+  }
+  button{font-family:inherit;font-size:inherit;cursor:pointer}
+  :focus-visible{outline:3px solid var(--steel);outline-offset:2px;border-radius:4px}
+  @media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+
+  /* ============ Header ============ */
+  header{
+    display:flex;align-items:center;gap:16px;flex-wrap:wrap;
+    padding:14px 20px;border-bottom:1px solid var(--steel-line);
+    position:sticky;top:0;background:var(--paper);z-index:20;
+  }
+  .brand{font-stretch:80%;font-weight:800;font-size:19px;letter-spacing:.02em;text-transform:uppercase;color:var(--steel)}
+  .brand small{display:block;font-weight:500;font-size:11px;letter-spacing:.14em;color:var(--ink-2);text-transform:uppercase}
+  .weeknav{display:flex;align-items:center;gap:8px;margin-left:auto}
+  .weeknav button{
+    background:var(--paper);border:1px solid var(--steel-line);border-radius:8px;
+    width:40px;height:40px;font-size:18px;color:var(--steel);
+  }
+  .weeknav button:hover{border-color:var(--steel)}
+  #weekLabel{font-family:var(--font-docket);font-weight:600;font-size:15px;min-width:150px;text-align:center}
+  .btn-publish{
+    background:var(--steel);color:#fff;border:none;border-radius:8px;
+    padding:11px 20px;font-weight:700;letter-spacing:.03em;
+  }
+  .btn-publish:hover{background:#2d3a45}
+  .demo-tag{
+    font-size:12px;font-weight:600;color:var(--amber);background:var(--amber-bg);
+    border:1px solid var(--amber);border-radius:99px;padding:3px 10px;display:none;
+  }
+
+  /* ============ Layout ============ */
+  .wrap{display:grid;grid-template-columns:1fr 300px;gap:20px;padding:20px;max-width:1280px;margin:0 auto}
+  @media(max-width:900px){.wrap{grid-template-columns:1fr;padding:12px;padding-bottom:120px}}
+
+  /* ============ Roster grid ============ */
+  .grid-scroll{overflow-x:auto;border:1px solid var(--steel-line);border-radius:var(--radius);background:var(--paper)}
+  table{border-collapse:collapse;width:100%;min-width:860px}
+  th,td{border-bottom:1px solid var(--steel-line);padding:0;vertical-align:top}
+  thead th{
+    background:var(--docket);padding:10px 8px;text-align:left;
+    font-size:12px;font-weight:700;letter-spacing:.1em;text-transform:uppercase;color:var(--steel);
+    position:sticky;top:0;
+  }
+  thead th .daycost{display:block;font-family:var(--font-docket);font-weight:500;font-size:12px;color:var(--ink-2);letter-spacing:0;text-transform:none;margin-top:2px}
+  th.workercol,td.workercol{
+    min-width:150px;max-width:170px;background:var(--paper);
+    position:sticky;left:0;z-index:2;border-right:1px solid var(--steel-line);
+  }
+  td.workercol{padding:10px 10px}
+  .wname{font-weight:700;font-size:15px;display:flex;align-items:center;gap:6px}
+  .wmeta{font-size:12.5px;color:var(--ink-2)}
+  .dot{width:9px;height:9px;border-radius:50%;flex:none}
+  .dot.ok{background:var(--green)} .dot.expiring{background:var(--amber)} .dot.expired{background:var(--red)}
+  td.cell{min-width:100px;padding:5px;cursor:pointer}
+  td.cell:hover{background:var(--docket)}
+  .shift{
+    background:var(--docket);border:1px solid var(--steel-line);border-left:3px solid var(--steel);
+    border-radius:7px;padding:6px 8px;margin-bottom:5px;position:relative;
+  }
+  .shift.published{border-left-color:var(--green)}
+  .shift .t{font-family:var(--font-docket);font-weight:600;font-size:13.5px}
+  .shift .r{font-size:12.5px;color:var(--ink-2)}
+  .shift .c{font-family:var(--font-docket);font-size:12.5px;color:var(--steel)}
+  .shift .x{
+    position:absolute;top:2px;right:4px;border:none;background:none;color:var(--ink-2);
+    font-size:15px;line-height:1;padding:4px;display:none;
+  }
+  .shift:hover .x{display:block}
+  .shift .x:hover{color:var(--red)}
+  .addhint{color:var(--steel-line);font-size:20px;text-align:center;display:block;padding:6px 0;user-select:none}
+  td.cell:hover .addhint{color:var(--steel)}
+
+  /* ============ THE DOCKET (signature) ============ */
+  .docket{
+    background:var(--docket);border:1px solid var(--steel-line);border-bottom:none;
+    font-family:var(--font-docket);font-size:14px;color:var(--ink);
+    padding:18px 18px 26px;position:sticky;top:84px;
+    /* serrated bottom edge, like a torn docket off the printer */
+    --serr:12px;
+    clip-path:polygon(0 0,100% 0,100% calc(100% - var(--serr)),
+      95% 100%,90% calc(100% - var(--serr)),85% 100%,80% calc(100% - var(--serr)),
+      75% 100%,70% calc(100% - var(--serr)),65% 100%,60% calc(100% - var(--serr)),
+      55% 100%,50% calc(100% - var(--serr)),45% 100%,40% calc(100% - var(--serr)),
+      35% 100%,30% calc(100% - var(--serr)),25% 100%,20% calc(100% - var(--serr)),
+      15% 100%,10% calc(100% - var(--serr)),5% 100%,0 calc(100% - var(--serr)));
+  }
+  .docket h2{
+    font-family:var(--font-ui);font-stretch:80%;font-weight:800;font-size:15px;
+    letter-spacing:.14em;text-transform:uppercase;color:var(--steel);text-align:center;
+  }
+  .docket .sub{text-align:center;font-size:12px;color:var(--ink-2);margin-bottom:10px}
+  .rule{border:none;border-top:1px dashed var(--steel);opacity:.4;margin:10px 0}
+  .dl{display:flex;justify-content:space-between;gap:8px;padding:2.5px 0}
+  .dl span:last-child{font-weight:600}
+  .dl.total{font-weight:600;font-size:16px}
+  .dl.grand{font-weight:600;font-size:19px;color:var(--steel)}
+  .flag{
+    font-family:var(--font-ui);font-size:13.5px;border-radius:7px;padding:8px 10px;margin-top:9px;
+  }
+  .flag.amber{background:var(--amber-bg);color:var(--amber);border:1px solid var(--amber)}
+  .flag.red{background:var(--red-bg);color:var(--red);border:1px solid var(--red)}
+  .revline{display:flex;gap:8px;align-items:center;margin-top:10px;font-family:var(--font-ui);font-size:13.5px}
+  .revline input{
+    width:110px;font-family:var(--font-docket);font-size:15px;padding:7px 8px;
+    border:1px solid var(--steel-line);border-radius:7px;background:var(--paper);color:var(--ink);
+  }
+
+  /* Mobile docket summary bar */
+  .docketbar{display:none}
+  @media(max-width:900px){
+    .docket{position:static}
+    .docketbar{
+      display:flex;justify-content:space-between;align-items:center;gap:10px;
+      position:fixed;left:0;right:0;bottom:0;z-index:30;
+      background:var(--docket);border-top:2px solid var(--steel);
+      padding:12px 18px calc(12px + env(safe-area-inset-bottom));
+      font-family:var(--font-docket);
+    }
+    .docketbar b{font-size:19px;color:var(--steel)}
+    .docketbar span{font-size:13px;color:var(--ink-2)}
+  }
+
+  /* ============ Alerts panel ============ */
+  .alerts{margin-top:18px;background:var(--paper);border:1px solid var(--steel-line);border-radius:var(--radius);padding:14px 16px}
+  .alerts h3{font-stretch:80%;font-weight:800;font-size:13px;letter-spacing:.12em;text-transform:uppercase;color:var(--steel);margin-bottom:8px}
+  .alert{display:flex;justify-content:space-between;gap:8px;font-size:14px;padding:6px 0;border-bottom:1px dashed var(--steel-line)}
+  .alert:last-child{border-bottom:none}
+  .alert .exp{font-family:var(--font-docket);font-size:13px}
+  .alert.expired .exp{color:var(--red);font-weight:600}
+  .alert.expiring .exp{color:var(--amber);font-weight:600}
+  .alerts .empty{color:var(--ink-2);font-size:14px}
+
+  /* ============ Modal ============ */
+  dialog{
+    border:1px solid var(--steel-line);border-radius:14px;padding:0;
+    width:min(420px,92vw);color:var(--ink);
+  }
+  dialog::backdrop{background:rgba(26,26,26,.45)}
+  .mhead{background:var(--docket);padding:14px 18px;border-bottom:1px solid var(--steel-line)}
+  .mhead h3{font-stretch:80%;font-weight:800;font-size:16px;text-transform:uppercase;letter-spacing:.06em;color:var(--steel)}
+  .mbody{padding:16px 18px;display:grid;gap:12px}
+  .field label{display:block;font-size:13px;font-weight:700;color:var(--steel);margin-bottom:4px;letter-spacing:.04em}
+  .field input,.field select{
+    width:100%;font-family:var(--font-ui);font-size:16px;padding:10px;
+    border:1px solid var(--steel-line);border-radius:8px;background:var(--paper);color:var(--ink);
+  }
+  .trow{display:grid;grid-template-columns:1fr 1fr 1fr;gap:10px}
+  .mfoot{display:flex;gap:10px;justify-content:flex-end;padding:14px 18px;border-top:1px solid var(--steel-line)}
+  .btn-ghost{background:var(--paper);border:1px solid var(--steel-line);border-radius:8px;padding:10px 16px;font-weight:600;color:var(--ink)}
+  .btn-primary{background:var(--steel);color:#fff;border:none;border-radius:8px;padding:10px 18px;font-weight:700}
+  .guardnote{font-size:13.5px;border-radius:7px;padding:8px 10px;display:none}
+  .guardnote.red{display:block;background:var(--red-bg);color:var(--red);border:1px solid var(--red)}
+
+  .toast{
+    position:fixed;top:14px;left:50%;transform:translateX(-50%);z-index:50;
+    background:var(--steel);color:#fff;border-radius:99px;padding:10px 20px;
+    font-weight:600;font-size:14.5px;display:none;
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="brand">Deskless Workforce OS<small>Roster · Core</small></div>
+  <span class="demo-tag" id="demoTag">Demo data — API not connected</span>
+  <div class="weeknav">
+    <button id="prevWeek" aria-label="Previous week">‹</button>
+    <span id="weekLabel"></span>
+    <button id="nextWeek" aria-label="Next week">›</button>
+  </div>
+  <button class="btn-publish" id="publishBtn">Publish roster</button>
+</header>
+
+<div class="wrap">
+  <main>
+    <div class="grid-scroll">
+      <table id="rosterTable" aria-label="Weekly roster">
+        <thead><tr id="headRow"></tr></thead>
+        <tbody id="bodyRows"></tbody>
+      </table>
+    </div>
+
+    <section class="alerts" aria-labelledby="alertsHead">
+      <h3 id="alertsHead">Credential wallet — expiring &amp; expired</h3>
+      <div id="alertList"><span class="empty">All credentials current.</span></div>
+    </section>
+  </main>
+
+  <aside>
+    <div class="docket" id="docket" aria-live="polite">
+      <h2>Labour Docket</h2>
+      <div class="sub" id="docketWeek"></div>
+      <hr class="rule">
+      <div id="docketDays"></div>
+      <hr class="rule">
+      <div class="dl total"><span>HOURS</span><span id="dHours">0.0</span></div>
+      <div class="dl"><span>Wages</span><span id="dWage">$0.00</span></div>
+      <div class="dl"><span>Super 12%</span><span id="dSuper">$0.00</span></div>
+      <hr class="rule">
+      <div class="dl grand"><span>TOTAL</span><span id="dTotal">$0.00</span></div>
+      <div class="revline">
+        <label for="revInput">Food revenue $</label>
+        <input id="revInput" type="number" inputmode="decimal" placeholder="0">
+        <strong id="dPct" style="font-family:var(--font-docket)">–%</strong>
+      </div>
+      <div id="docketFlags"></div>
+    </div>
+  </aside>
+</div>
+
+<div class="docketbar" id="docketBar">
+  <div><span>Week labour</span><br><b id="dBarTotal">$0.00</b></div>
+  <div style="text-align:right"><span id="dBarHours">0.0 hrs</span><br><span id="dBarPct"></span></div>
+</div>
+
+<dialog id="shiftModal">
+  <form method="dialog" id="shiftForm">
+    <div class="mhead"><h3 id="modalTitle">Add shift</h3></div>
+    <div class="mbody">
+      <div class="field"><label for="fWorker">Worker</label><select id="fWorker" required></select></div>
+      <div class="trow">
+        <div class="field"><label for="fStart">Start</label><input id="fStart" type="time" value="09:00" required></div>
+        <div class="field"><label for="fEnd">Finish</label><input id="fEnd" type="time" value="17:00" required></div>
+        <div class="field"><label for="fBreak">Break min</label><input id="fBreak" type="number" value="30" min="0" step="5"></div>
+      </div>
+      <div class="field"><label for="fRole">Role (optional)</label><input id="fRole" type="text" placeholder="e.g. Pass, Larder, FOH"></div>
+      <div class="guardnote" id="guardNote"></div>
+    </div>
+    <div class="mfoot">
+      <button type="button" class="btn-ghost" id="cancelBtn">Cancel</button>
+      <button type="submit" class="btn-primary" id="saveShift">Save shift</button>
+    </div>
+  </form>
+</dialog>
+
+<div class="toast" id="toast" role="status"></div>
+
+<script>
+/* =====================================================================
+   Deskless Workforce OS — Roster dashboard
+   Talks to /api/* (core-os-routes.js). If the API is unreachable it
+   drops to demo mode with sample data so the page always works.
+===================================================================== */
+const API = "/api/core";
+let KEY = new URLSearchParams(location.search).get("key") || localStorage.getItem("dwos_key") || "";
+if (KEY) localStorage.setItem("dwos_key", KEY);
+function api(path){ return API + path + (path.includes("?") ? "&" : "?") + "key=" + encodeURIComponent(KEY); }
+let DEMO = false;
+let weekStart = mondayOf(new Date());
+let workers = [], shifts = [], costing = null, pendingCell = null;
+
+const DAYS = ["Mon","Tue","Wed","Thu","Fri","Sat","Sun"];
+
+/* ---------- demo fallback (mirror of server maths, L1/L3 only) ---------- */
+const DEMO_WORKERS = [
+  {id:"w1", name:"Aarav S.",  employmentType:"casual",   level:"L1", credentialStatus:"ok"},
+  {id:"w2", name:"Maria G.",  employmentType:"fulltime", level:"L3", credentialStatus:"expiring"},
+  {id:"w3", name:"Binod T.",  employmentType:"casual",   level:"L1", credentialStatus:"expired"},
+  {id:"w4", name:"Jess K.",   employmentType:"parttime", level:"L2", credentialStatus:"ok"},
+];
+const DEMO_RATES = {INTRO:25.85,L1:26.44,L2:26.95,L3:27.34,L4:28.80,L5:30.61,L6:31.41};
+const DEMO_ALERTS = [
+  {worker:"Maria G.", credential:"Visa / right to work", expiryDate:addDays(todayStr(),21), status:"expiring"},
+  {worker:"Binod T.", credential:"RSA / RCG", expiryDate:addDays(todayStr(),-6), status:"expired"},
+];
+function demoCost(s, w){
+  const mult = {weekday:{p:1,c:1.25},saturday:{p:1.25,c:1.5},sunday:{p:1.5,c:1.75}};
+  const d = new Date(s.date+"T12:00:00").getDay();
+  const type = d===6?"saturday":d===0?"sunday":"weekday";
+  const isC = w.employmentType==="casual";
+  let mins = toMin(s.end)-toMin(s.start); if(mins<=0) mins+=1440;
+  const hrs = Math.max(0,(mins-(s.unpaidBreakMins||0)))/60;
+  const wage = hrs * DEMO_RATES[w.level] * mult[type][isC?"c":"p"];
+  return {hours:r2(hrs), wageCost:r2(wage), superCost:r2(wage*.12), totalCost:r2(wage*1.12), dayType:type};
+}
+
+/* ---------- data ---------- */
+async function load(retried){
+  try{
+    const [rRes,wRes,aRes] = await Promise.all([
+      fetch(api(`/roster?weekStart=${weekStart}`)),
+      fetch(api(`/workers`)),
+      fetch(api(`/wallet-alerts`))
+    ]);
+    if((rRes.status===401||wRes.status===401) && !retried){
+      const entered = prompt("Enter your manager dashboard key");
+      if(entered){ KEY = entered; localStorage.setItem("dwos_key", KEY); return load(true); }
+      throw new Error("no key");
+    }
+    if(!rRes.ok||!wRes.ok) throw new Error("api");
+    const r = await rRes.json();
+    workers = (await wRes.json()).workers;
+    shifts = r.shifts; costing = r.costing;
+    renderAlerts(aRes.ok ? (await aRes.json()).alerts : []);
+  }catch(e){
+    DEMO = true;
+    document.getElementById("demoTag").style.display="inline-block";
+    workers = DEMO_WORKERS;
+    if(!shifts.demoSeeded){
+      shifts = seedDemoShifts(); shifts.demoSeeded=true;
+    }
+    costing = demoRosterCost();
+    renderAlerts(DEMO_ALERTS);
+  }
+  render();
+}
+function seedDemoShifts(){
+  const s=[]; let n=0;
+  const add=(w,off,st,en,role)=>s.push({id:"d"+(n++),workerId:w,date:addDays(weekStart,off),start:st,end:en,unpaidBreakMins:30,role,published:off<2});
+  add("w1",0,"10:00","18:30","Larder"); add("w1",4,"15:00","23:30","Pass");
+  add("w2",0,"07:00","15:30","Pass");   add("w2",1,"07:00","15:30","Pass"); add("w2",5,"08:00","16:30","Pass");
+  add("w3",5,"11:00","21:00","Grill");  add("w4",2,"09:00","14:00","FOH");
+  return s;
+}
+function demoRosterCost(){
+  const byId=Object.fromEntries(workers.map(w=>[w.id,w]));
+  const lines=shifts.filter(x=>x.id).map(s=>({...demoCost(s,byId[s.workerId]),shiftId:s.id,date:s.date}));
+  const wage=r2(lines.reduce((t,l)=>t+l.wageCost,0));
+  const sup=r2(lines.reduce((t,l)=>t+l.superCost,0));
+  return {lines,totals:{hours:r2(lines.reduce((t,l)=>t+l.hours,0)),wage,super:sup,total:r2(wage+sup)},weeklyOTFlags:[],hasUnverifiedRates:true};
+}
+
+/* ---------- render ---------- */
+function render(){
+  document.getElementById("weekLabel").textContent =
+    fmt(weekStart)+" – "+fmt(addDays(weekStart,6));
+  document.getElementById("docketWeek").textContent =
+    "WEEK "+fmt(weekStart).toUpperCase()+" · "+workers.length+" ON CREW";
+
+  // header row
+  const costByDate={};
+  (costing?.lines||[]).forEach(l=>{costByDate[l.date]=(costByDate[l.date]||0)+l.totalCost;});
+  let h='<th class="workercol">Crew</th>';
+  for(let i=0;i<7;i++){
+    const d=addDays(weekStart,i);
+    h+=`<th>${DAYS[i]} ${d.slice(8)}<span class="daycost">${costByDate[d]?"$"+costByDate[d].toFixed(0):"—"}</span></th>`;
+  }
+  document.getElementById("headRow").innerHTML=h;
+
+  // body
+  const costByShift={};
+  (costing?.lines||[]).forEach(l=>costByShift[l.shiftId]=l);
+  let b="";
+  for(const w of workers){
+    b+=`<tr><td class="workercol">
+      <div class="wname"><span class="dot ${w.credentialStatus||"ok"}" title="Credentials: ${w.credentialStatus||"ok"}"></span>${esc(w.name)}</div>
+      <div class="wmeta">${w.level} · ${etLabel(w.employmentType)}</div></td>`;
+    for(let i=0;i<7;i++){
+      const d=addDays(weekStart,i);
+      const cell=shifts.filter(s=>s.workerId===w.id&&s.date===d);
+      b+=`<td class="cell" data-worker="${w.id}" data-date="${d}" tabindex="0" aria-label="Add shift for ${esc(w.name)} ${DAYS[i]}">`;
+      for(const s of cell){
+        const c=costByShift[s.id];
+        b+=`<div class="shift ${s.published?"published":""}">
+          <button class="x" data-del="${s.id}" aria-label="Remove shift">×</button>
+          <div class="t">${s.start}–${s.end}</div>
+          ${s.role?`<div class="r">${esc(s.role)}</div>`:""}
+          <div class="c">${c?"$"+c.totalCost.toFixed(2):""}</div></div>`;
+      }
+      b+=`<span class="addhint">+</span></td>`;
+    }
+    b+="</tr>";
+  }
+  document.getElementById("bodyRows").innerHTML=b;
+
+  // docket
+  let dd="";
+  for(let i=0;i<7;i++){
+    const d=addDays(weekStart,i);
+    dd+=`<div class="dl"><span>${DAYS[i]} ${d.slice(8)}</span><span>${costByDate[d]?"$"+costByDate[d].toFixed(2):"—"}</span></div>`;
+  }
+  document.getElementById("docketDays").innerHTML=dd;
+  const t=costing?.totals||{hours:0,wage:0,super:0,total:0};
+  set("dHours",t.hours.toFixed(1)); set("dWage","$"+t.wage.toFixed(2));
+  set("dSuper","$"+t.super.toFixed(2)); set("dTotal","$"+t.total.toFixed(2));
+  set("dBarTotal","$"+t.total.toFixed(2)); set("dBarHours",t.hours.toFixed(1)+" hrs");
+  updatePct();
+
+  let flags="";
+  for(const f of (costing?.weeklyOTFlags||[])){
+    const w=workers.find(x=>x.id===f.workerId);
+    flags+=`<div class="flag amber">⚠ ${esc(w?w.name:f.workerId)} rostered ${f.weeklyHours} hrs — over ${f.threshold} hr ordinary week. Overtime applies.</div>`;
+  }
+  if(costing?.hasUnverifiedRates)
+    flags+=`<div class="flag amber">⚠ Some pay rates are estimates — verify against the current Fair Work pay guide before pay run.</div>`;
+  document.getElementById("docketFlags").innerHTML=flags;
+}
+
+function renderAlerts(alerts){
+  const el=document.getElementById("alertList");
+  if(!alerts||!alerts.length){el.innerHTML='<span class="empty">All credentials current.</span>';return;}
+  el.innerHTML=alerts.map(a=>`
+    <div class="alert ${a.status}">
+      <span><strong>${esc(a.worker)}</strong> — ${esc(a.credential)}</span>
+      <span class="exp">${a.status==="expired"?"expired ":"exp "}${fmt(a.expiryDate)}</span>
+    </div>`).join("");
+}
+
+function updatePct(){
+  const rev=parseFloat(document.getElementById("revInput").value);
+  const total=costing?.totals?.total||0;
+  const pct=(rev>0)?((total/rev)*100).toFixed(1)+"%":"–%";
+  set("dPct",pct); set("dBarPct",rev>0?pct+" of revenue":"");
+}
+
+/* ---------- actions ---------- */
+document.getElementById("bodyRows").addEventListener("click",async e=>{
+  const del=e.target.closest("[data-del]");
+  if(del){
+    if(!confirm("Remove this shift? A record is kept in the audit trail.")) return;
+    if(DEMO){shifts=shifts.filter(s=>s.id!==del.dataset.del);costing=demoRosterCost();render();}
+    else{await fetch(api(`/roster/shift/${del.dataset.del}`),{method:"DELETE"});await load();}
+    toast("Shift removed");
+    return;
+  }
+  const cell=e.target.closest("td.cell");
+  if(cell) openModal(cell.dataset.worker,cell.dataset.date);
+});
+document.getElementById("bodyRows").addEventListener("keydown",e=>{
+  const cell=e.target.closest("td.cell");
+  if(cell&&(e.key==="Enter"||e.key===" ")){e.preventDefault();openModal(cell.dataset.worker,cell.dataset.date);}
+});
+
+function openModal(workerId,date){
+  pendingCell={workerId,date};
+  const sel=document.getElementById("fWorker");
+  sel.innerHTML=workers.map(w=>`<option value="${w.id}" ${w.id===workerId?"selected":""}>${esc(w.name)} (${w.level})</option>`).join("");
+  document.getElementById("modalTitle").textContent="Add shift — "+fmt(date);
+  document.getElementById("guardNote").className="guardnote";
+  document.getElementById("shiftModal").showModal();
+}
+document.getElementById("cancelBtn").onclick=()=>document.getElementById("shiftModal").close();
+
+document.getElementById("shiftForm").addEventListener("submit",async e=>{
+  e.preventDefault();
+  const body={
+    workerId:document.getElementById("fWorker").value,
+    date:pendingCell.date,
+    start:document.getElementById("fStart").value,
+    end:document.getElementById("fEnd").value,
+    unpaidBreakMins:parseInt(document.getElementById("fBreak").value)||0,
+    role:document.getElementById("fRole").value||null,
+  };
+  if(DEMO){
+    shifts.push({id:"d"+Date.now(),...body,published:false});
+    costing=demoRosterCost();
+    document.getElementById("shiftModal").close(); render(); toast("Shift saved");
+    return;
+  }
+  const res=await fetch(api(`/roster/shift`),{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+  if(res.status===409){
+    const j=await res.json();
+    const g=document.getElementById("guardNote");
+    g.className="guardnote red";
+    g.innerHTML="🛑 "+j.warnings.map(w=>`${w.credential} expired ${fmt(w.expired)}`).join("; ")+
+      '<br><button type="button" class="btn-ghost" style="margin-top:8px" id="overrideBtn">Roster anyway (logged)</button>';
+    document.getElementById("overrideBtn").onclick=async()=>{
+      await fetch(api(`/roster/shift`),{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({...body,overrideGuard:true})});
+      document.getElementById("shiftModal").close(); await load(); toast("Shift saved with override — logged");
+    };
+    return;
+  }
+  document.getElementById("shiftModal").close(); await load(); toast("Shift saved");
+});
+
+document.getElementById("publishBtn").onclick=async()=>{
+  if(DEMO){shifts.forEach(s=>s.published=true);render();toast("Demo: roster marked published");return;}
+  const res=await fetch(api(`/roster/publish`),{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({weekStart})});
+  const j=await res.json();
+  await load();
+  toast(res.ok?`Roster published — ${j.workersNotified}/${j.workersOnRoster} notified on WhatsApp`:"Publish failed: "+j.error);
+};
+
+document.getElementById("prevWeek").onclick=()=>{weekStart=addDays(weekStart,-7);load();};
+document.getElementById("nextWeek").onclick=()=>{weekStart=addDays(weekStart,7);load();};
+document.getElementById("revInput").addEventListener("input",updatePct);
+
+/* ---------- utils ---------- */
+function mondayOf(d){const x=new Date(d);const day=(x.getDay()+6)%7;x.setDate(x.getDate()-day);return x.toISOString().slice(0,10);}
+function addDays(ds,n){const d=new Date(ds+"T12:00:00");d.setDate(d.getDate()+n);return d.toISOString().slice(0,10);}
+function todayStr(){return new Date().toISOString().slice(0,10);}
+function fmt(ds){return new Date(ds+"T12:00:00").toLocaleDateString("en-AU",{day:"numeric",month:"short"});}
+function toMin(t){const[a,b]=t.split(":").map(Number);return a*60+b;}
+function etLabel(t){return{fulltime:"Full-time",parttime:"Part-time",casual:"Casual"}[t]||t;}
+function r2(n){return Math.round(n*100)/100;}
+function set(id,v){document.getElementById(id).textContent=v;}
+function esc(s){return String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));}
+function toast(msg){const t=document.getElementById("toast");t.textContent=msg;t.style.display="block";clearTimeout(t._h);t._h=setTimeout(()=>t.style.display="none",3200);}
+
+load();
+</script>
+</body>
+</html>

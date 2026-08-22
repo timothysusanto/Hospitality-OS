@@ -16,7 +16,7 @@
  */
 
 const express = require("express");
-const { costShift, costRoster, getAward, listUnverifiedRates } = require("./award-engine");
+const { costShift, costRoster, getAward, listUnverifiedRates, listAwards } = require("./award-engine");
 
 const { CREDENTIAL_TYPES } = require("./credentialTypes");
 
@@ -63,13 +63,37 @@ module.exports = function coreOS({ db, tenantId, sendWhatsApp }) {
     try {
       const { name, phone, employmentType, level, awardCode } = req.body;
       if (!name || !employmentType || !level) return res.status(400).json({ error: "name, employmentType and level are required" });
-      getAward(awardCode || "MA000009").levels[level] || res.status(400).json({ error: "Unknown classification level" });
+      if (!getAward(awardCode || "MA000009").levels[level]) {
+        return res.status(400).json({ error: "Unknown classification level for that award" });
+      }
       const ref = await T().collection("workers").add({
         name, phone: phone || null, employmentType, level,
         awardCode: awardCode || "MA000009", active: true, createdAt: now(),
       });
       res.json({ id: ref.id });
     } catch (e) { err(res, e); }
+  });
+
+  router.put("/workers/:id", async (req, res) => {
+    try {
+      const ref = T().collection("workers").doc(req.params.id);
+      const doc = await ref.get();
+      if (!doc.exists) return res.status(404).json({ error: "Worker not found" });
+      const allowed = ["name", "phone", "employmentType", "level", "awardCode", "active"];
+      const patch = {};
+      for (const k of allowed) if (req.body[k] !== undefined) patch[k] = req.body[k];
+      if (!Object.keys(patch).length) return res.status(400).json({ error: `Nothing to update. Allowed: ${allowed.join(", ")}` });
+      const merged = { ...doc.data(), ...patch };
+      if (!getAward(merged.awardCode || "MA000009").levels[merged.level]) {
+        return res.status(400).json({ error: "Unknown classification level for that award" });
+      }
+      await ref.update({ ...patch, updatedAt: now() });
+      res.json({ ok: true });
+    } catch (e) { err(res, e); }
+  });
+
+  router.get("/awards", (_req, res) => {
+    try { res.json({ awards: listAwards() }); } catch (e) { err(res, e); }
   });
 
   // ---------- Roster ----------

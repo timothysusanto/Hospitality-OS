@@ -58,6 +58,74 @@ const AWARD_CONFIGS = {
     },
     superRate: 0.12, // Superannuation Guarantee 12% from 1 Jul 2025 (statutory)
   },
+
+  /**
+   * CLEANING SERVICES AWARD 2020 (MA000022) — TEMPLATE for the non-hospitality
+   * pilot. Bases are 2025/26 published rates (L1 $25.85 / L2 $26.70 / L3 $28.12)
+   * uplifted 4.75% per the 2026 review — ESTIMATES until checked against the
+   * current FWO pay guide. Penalty structure simplified: the real award has
+   * shift loadings (early/afternoon/non-perm night 115%, permanent night 130%)
+   * which v1 approximates with a single evening/night time loading. VERIFY
+   * both rates and structure before any live pay run.
+   */
+  MA000022: {
+    code: "MA000022",
+    name: "Cleaning Services Award 2020",
+    casualLoading: 0.25,
+    levels: {
+      L1: { label: "Level 1 — Cleaner",            base: 27.08, verified: false },
+      L2: { label: "Level 2 — Specialist tasks",   base: 27.97, verified: false },
+      L3: { label: "Level 3 — Supervisor/plant",   base: 29.46, verified: false },
+    },
+    penalties: {
+      permanent: { weekday: 1.0,  saturday: 1.5,  sunday: 2.0,  publicHoliday: 2.5  },
+      casual:    { weekday: 1.25, saturday: 1.75, sunday: 2.25, publicHoliday: 2.75 },
+    },
+    timeLoadings: [
+      { id: "shift_eve",   label: "Early/afternoon/night shift (approx)", startHour: 18, endHour: 24, pct: 0.15, daysOfWeek: [1,2,3,4,5], verified: false },
+      { id: "shift_night", label: "Night before 6am (approx)",            startHour: 0,  endHour: 6,  pct: 0.15, daysOfWeek: [1,2,3,4,5], verified: false },
+    ],
+    overtime: {
+      dailyThresholdHours: 10, weeklyThresholdHours: 38,
+      firstBlockHours: 2, firstBlockMult: 1.5, thenMult: 2.0,
+      casualOTMult: { first: 1.75, then: 2.25 },
+      verified: false,
+    },
+    superRate: 0.12,
+  },
+
+  /**
+   * SECURITY SERVICES INDUSTRY AWARD 2020 (MA000016) — TEMPLATE. All figures
+   * are ESTIMATES pending verification against the current FWO pay guide;
+   * the award's real structure includes broken-shift and night-span loadings
+   * not modelled in v1.
+   */
+  MA000016: {
+    code: "MA000016",
+    name: "Security Services Industry Award 2020",
+    casualLoading: 0.25,
+    levels: {
+      L1: { label: "Level 1 — Security Officer 1", base: 27.30, verified: false },
+      L2: { label: "Level 2 — Security Officer 2", base: 28.10, verified: false },
+      L3: { label: "Level 3 — Security Officer 3", base: 28.90, verified: false },
+      L4: { label: "Level 4 — Security Officer 4", base: 29.70, verified: false },
+    },
+    penalties: {
+      permanent: { weekday: 1.0,  saturday: 1.5,  sunday: 2.0,  publicHoliday: 2.5  },
+      casual:    { weekday: 1.25, saturday: 1.75, sunday: 2.25, publicHoliday: 2.75 },
+    },
+    timeLoadings: [
+      { id: "night", label: "Night span (approx)", startHour: 22, endHour: 24, pct: 0.15, daysOfWeek: [1,2,3,4,5], verified: false },
+      { id: "early", label: "Early span (approx)", startHour: 0,  endHour: 6,  pct: 0.15, daysOfWeek: [1,2,3,4,5], verified: false },
+    ],
+    overtime: {
+      dailyThresholdHours: 12, weeklyThresholdHours: 38,
+      firstBlockHours: 2, firstBlockMult: 1.5, thenMult: 2.0,
+      casualOTMult: { first: 1.75, then: 2.25 },
+      verified: false,
+    },
+    superRate: 0.12,
+  },
 };
 
 // ---------------------------------------------------------------------------
@@ -183,8 +251,17 @@ function costRoster(shifts, workersById, opts = {}) {
   };
 }
 
-/** Every rate still needing verification against the official pay guide. */
-function listUnverifiedRates(code = "MA000009") {
+/** Light listing of awards + levels for dropdowns. */
+function listAwards() {
+  return Object.values(AWARD_CONFIGS).map((a) => ({
+    code: a.code, name: a.name,
+    levels: Object.entries(a.levels).map(([key, v]) => ({ key, label: v.label, base: v.base, verified: v.verified })),
+  }));
+}
+
+/** Every rate still needing verification, across all awards when code omitted. */
+function listUnverifiedRates(code = null) {
+  if (!code) return Object.keys(AWARD_CONFIGS).flatMap((c) => listUnverifiedRates(c));
   const a = getAward(code);
   const out = [];
   for (const [k, v] of Object.entries(a.levels)) if (!v.verified) out.push(`${code} ${k} base $${v.base}`);
@@ -198,4 +275,4 @@ function hourOverlap(aStart, aEnd, bStart, bEnd) {
 }
 function round2(n) { return Math.round(n * 100) / 100; }
 
-module.exports = { AWARD_CONFIGS, getAward, dayType, costShift, costRoster, listUnverifiedRates };
+module.exports = { AWARD_CONFIGS, getAward, dayType, costShift, costRoster, listUnverifiedRates, listAwards };

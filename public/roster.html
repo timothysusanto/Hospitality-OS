@@ -215,6 +215,7 @@
     <span id="weekLabel"></span>
     <button id="nextWeek" aria-label="Next week">›</button>
   </div>
+  <button class="btn-ghost" id="addWorkerBtn" style="background:var(--paper);border:1px solid var(--steel-line);border-radius:8px;padding:10px 16px;font-weight:600;color:var(--ink)">+ Crew</button>
   <button class="btn-publish" id="publishBtn">Publish roster</button>
 </header>
 
@@ -280,6 +281,30 @@
   </form>
 </dialog>
 
+<dialog id="workerModal">
+  <form method="dialog" id="workerForm">
+    <div class="mhead"><h3 id="workerModalTitle">Add crew member</h3></div>
+    <div class="mbody">
+      <div class="field"><label for="wName">Name</label><input id="wName" type="text" required></div>
+      <div class="field"><label for="wPhone">WhatsApp number</label>
+        <input id="wPhone" type="tel" inputmode="tel" placeholder="614XXXXXXXX — international, no +">
+      </div>
+      <div class="trow" style="grid-template-columns:1fr 1fr">
+        <div class="field"><label for="wType">Employment</label>
+          <select id="wType"><option value="casual">Casual</option><option value="parttime">Part-time</option><option value="fulltime">Full-time</option></select></div>
+        <div class="field"><label for="wAward">Award</label><select id="wAward"></select></div>
+      </div>
+      <div class="field"><label for="wLevel">Classification level</label><select id="wLevel"></select></div>
+      <div class="guardnote" id="workerNote"></div>
+    </div>
+    <div class="mfoot">
+      <button type="button" class="btn-ghost" id="workerDeactivate" style="margin-right:auto;color:var(--red);border-color:var(--red);display:none">Deactivate</button>
+      <button type="button" class="btn-ghost" id="workerCancel">Cancel</button>
+      <button type="submit" class="btn-primary" id="workerSave">Save</button>
+    </div>
+  </form>
+</dialog>
+
 <dialog id="walletModal">
   <div class="mhead"><h3 id="walletTitle">Wallet</h3></div>
   <div class="mbody">
@@ -297,6 +322,7 @@
     <p style="font-size:13px;color:var(--ink-2);margin-top:10px">Workers can also file these themselves — they just send a photo of the card to the venue WhatsApp.</p>
   </div>
   <div class="mfoot">
+    <button type="button" class="btn-ghost" id="walletEditWorker" style="margin-right:auto">Edit details</button>
     <button type="button" class="btn-ghost" id="walletClose">Close</button>
     <button type="submit" form="credForm" class="btn-primary">Save credential</button>
   </div>
@@ -413,7 +439,7 @@ function render(){
   for(const w of workers){
     b+=`<tr><td class="workercol">
       <div class="wname"><span class="dot ${w.credentialStatus||"ok"}" title="Credentials: ${w.credentialStatus||"ok"}"></span>${esc(w.name)}</div>
-      <div class="wmeta">${w.level} · ${etLabel(w.employmentType)}</div></td>`;
+      <div class="wmeta">${w.level} · ${etLabel(w.employmentType)}${w.awardCode&&w.awardCode!=="MA000009"?" · "+esc((AWARDS.find(a=>a.code===w.awardCode)||{name:w.awardCode}).name):""}</div></td>`;
     for(let i=0;i<7;i++){
       const d=addDays(weekStart,i);
       const cell=shifts.filter(s=>s.workerId===w.id&&s.date===d);
@@ -543,6 +569,69 @@ document.getElementById("publishBtn").onclick=async()=>{
 document.getElementById("prevWeek").onclick=()=>{weekStart=addDays(weekStart,-7);load();};
 document.getElementById("nextWeek").onclick=()=>{weekStart=addDays(weekStart,7);load();};
 document.getElementById("revInput").addEventListener("input",updatePct);
+
+/* ---------- crew management ---------- */
+let AWARDS = [
+  {code:"MA000009", name:"Hospitality (HIGA)", levels:[{key:"INTRO",label:"Introductory"},{key:"L1",label:"Level 1 — F&B/Kitchen Att."},{key:"L2",label:"Level 2 — Cook Gr1/HK"},{key:"L3",label:"Level 3 — Cook Gr2/Senior"},{key:"L4",label:"Level 4 — Cook Gr3 (trade)"},{key:"L5",label:"Level 5 — Cook Gr4/Sup."},{key:"L6",label:"Level 6 — Cook Gr5"}]},
+  {code:"MA000022", name:"Cleaning Services", levels:[{key:"L1",label:"Level 1 — Cleaner"},{key:"L2",label:"Level 2 — Specialist tasks"},{key:"L3",label:"Level 3 — Supervisor/plant"}]},
+  {code:"MA000016", name:"Security Services", levels:[{key:"L1",label:"Level 1 — Security Officer 1"},{key:"L2",label:"Level 2 — Security Officer 2"},{key:"L3",label:"Level 3 — Security Officer 3"},{key:"L4",label:"Level 4 — Security Officer 4"}]},
+];
+let editingWorker = null;
+(async()=>{ try{ const r=await fetch(api("/awards")); if(r.ok){ AWARDS=(await r.json()).awards.map(a=>({...a, name:a.name.replace(" Award 2020","").replace(" Industry","")})); } }catch(e){} })();
+
+function fillAwardSelects(awardCode, level){
+  const aSel=document.getElementById("wAward");
+  aSel.innerHTML=AWARDS.map(a=>`<option value="${a.code}" ${a.code===awardCode?"selected":""}>${esc(a.name)}</option>`).join("");
+  fillLevels(awardCode||AWARDS[0].code, level);
+}
+function fillLevels(code, level){
+  const a=AWARDS.find(x=>x.code===code)||AWARDS[0];
+  document.getElementById("wLevel").innerHTML=a.levels.map(l=>`<option value="${l.key}" ${l.key===level?"selected":""}>${esc(l.label)}</option>`).join("");
+}
+document.getElementById("wAward").addEventListener("change",e=>fillLevels(e.target.value));
+
+function openWorkerModal(w){
+  editingWorker=w||null;
+  document.getElementById("workerModalTitle").textContent=w?("Edit — "+w.name):"Add crew member";
+  document.getElementById("wName").value=w?w.name:"";
+  document.getElementById("wPhone").value=w&&w.phone?w.phone:"";
+  document.getElementById("wType").value=w?w.employmentType:"casual";
+  fillAwardSelects(w?(w.awardCode||"MA000009"):"MA000009", w?w.level:undefined);
+  document.getElementById("workerDeactivate").style.display=w?"inline-block":"none";
+  document.getElementById("workerNote").className="guardnote";
+  document.getElementById("workerModal").showModal();
+}
+document.getElementById("addWorkerBtn").onclick=()=>openWorkerModal(null);
+document.getElementById("workerCancel").onclick=()=>document.getElementById("workerModal").close();
+document.getElementById("walletEditWorker").onclick=()=>{ document.getElementById("walletModal").close(); openWorkerModal(walletWorker); };
+
+document.getElementById("workerForm").addEventListener("submit",async e=>{
+  e.preventDefault();
+  const body={
+    name:document.getElementById("wName").value.trim(),
+    phone:document.getElementById("wPhone").value.replace(/[^0-9]/g,"")||null,
+    employmentType:document.getElementById("wType").value,
+    awardCode:document.getElementById("wAward").value,
+    level:document.getElementById("wLevel").value,
+  };
+  if(DEMO){
+    if(editingWorker){ Object.assign(editingWorker,body); }
+    else workers.push({id:"w"+Date.now(),...body,credentialStatus:"ok"});
+    document.getElementById("workerModal").close(); render(); toast(editingWorker?"Crew member updated (demo)":"Crew member added (demo)"); return;
+  }
+  const r = editingWorker
+    ? await fetch(api(`/workers/${editingWorker.id}`),{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)})
+    : await fetch(api(`/workers`),{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+  if(r.ok){ document.getElementById("workerModal").close(); await load(); toast(editingWorker?"Crew member updated":"Crew member added"); }
+  else{ const j=await r.json().catch(()=>({})); const g=document.getElementById("workerNote"); g.className="guardnote red"; g.textContent=j.error||"Save failed"; }
+});
+
+document.getElementById("workerDeactivate").onclick=async()=>{
+  if(!editingWorker||!confirm(`Deactivate ${editingWorker.name}? They stay in past records but leave the roster.`)) return;
+  if(DEMO){ workers=workers.filter(w=>w.id!==editingWorker.id); document.getElementById("workerModal").close(); render(); toast("Deactivated (demo)"); return; }
+  const r=await fetch(api(`/workers/${editingWorker.id}`),{method:"PUT",headers:{"Content-Type":"application/json"},body:JSON.stringify({active:false})});
+  if(r.ok){ document.getElementById("workerModal").close(); await load(); toast("Crew member deactivated"); }
+};
 
 /* ---------- credential wallet ---------- */
 let walletWorker = null;

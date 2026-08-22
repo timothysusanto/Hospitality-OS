@@ -50,7 +50,7 @@ const {
   handleTempsCommand, handleFoodSafetyReply, handleCleanCommand,
   handleDeliveryCommand, handleFoodSafetyPhoto,
 } = require("./foodSafetyHandler");
-const { handleTrainCommand, handleTrainingReply } = require("./trainingHandler");
+const { handleTrainCommand, handleTrainingReply, handleEnrolCommand } = require("./trainingHandler");
 
 async function handleIncoming(message, deps, tenantContext = null) {
   const { staffStore, pendingActions } = deps;
@@ -160,6 +160,10 @@ async function handleIncoming(message, deps, tenantContext = null) {
     }
     if (body === "train" || body.startsWith("train ")) {
       await handleTrainCommand(from, staff, body, tenantId, deps, sendOpts);
+      return;
+    }
+    if (body === "enrol" || body === "enroll" || body.startsWith("enrol ") || body.startsWith("enroll ")) {
+      await handleEnrolCommand(from, staff, body.replace(/^enroll/, "enrol"), tenantId, deps, sendOpts);
       return;
     }
     if (await handleWalletReply(from, staff, body, tenantId, deps, sendOpts)) return;

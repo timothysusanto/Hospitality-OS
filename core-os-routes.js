@@ -253,6 +253,92 @@ module.exports = function coreOS({ db, tenantId, sendWhatsApp }) {
     } catch (e) { err(res, e); }
   });
 
+  // ---------- Accredited training loop ----------
+  // Gap report: required credentials (settings/training.requiredCredentials)
+  // each active worker is missing or holds expired.
+  router.get("/training-gaps", async (_req, res) => {
+    try {
+      const { getCourses } = require("./trainingHandler");
+      const tDoc = await T().collection("settings").doc("training").get();
+      const required = tDoc.exists ? (tDoc.data().requiredCredentials || []) : [];
+      const courses = await getCourses(tenantId);
+      const [workerSnap, credSnap] = await Promise.all([
+        T().collection("workers").get(), T().collection("credentials").get(),
+      ]);
+      const creds = credSnap.docs.map((d) => d.data());
+      const today = new Date().toISOString().slice(0, 10);
+      const gaps = [];
+      for (const d of workerSnap.docs) {
+        const w = d.data();
+        if (w.active === false) continue;
+        for (const type of required) {
+          const held = creds.filter((c) =>
+            c.type === type && (c.workerId === d.id || (c.workerPhone && w.phone && c.workerPhone === w.phone)));
+          const current = held.some((c) => c.expiryDate && c.expiryDate >= today);
+          if (!current) {
+            const course = courses.find((c) => c.credentialType === type) || null;
+            gaps.push({
+              workerId: d.id, worker: w.name, phone: w.phone || null,
+              credentialType: type,
+              credential: (CREDENTIAL_TYPES[type] || { label: type }).label,
+              status: held.length ? "expired" : "missing",
+              courseId: course ? course.id : null,
+            });
+          }
+        }
+      }
+      res.json({ required, gaps });
+    } catch (e) { err(res, e); }
+  });
+
+  // One-tap: WhatsApp the enrol link for a course to a worker.
+  router.post("/send-enrol", async (req, res) => {
+    try {
+      const { workerId, courseId } = req.body;
+      if (!workerId || !courseId) return res.status(400).json({ error: "workerId and courseId are required" });
+      const wDoc = await T().collection("workers").doc(workerId).get();
+      if (!wDoc.exists || !wDoc.data().phone) return res.status(400).json({ error: "Worker has no WhatsApp number on file" });
+      const { getCourses } = require("./trainingHandler");
+      const course = (await getCourses(tenantId)).find((c) => c.id === courseId);
+      if (!course) return res.status(404).json({ error: "Course not found in catalog" });
+      if (!sendWhatsApp) return res.status(503).json({ error: "WhatsApp sending not configured" });
+      const w = wDoc.data();
+      await sendWhatsApp(w.phone,
+        `🎓 Hi ${(w.name || "there").split(" ")[0]} — your manager has asked you to complete *${course.label}*.\n` +
+        `${course.url}${course.note ? "\n⚠ " + course.note : ""}\n\n` +
+        `When you finish, send me a photo of the certificate and it goes straight into your wallet.`);
+      res.json({ ok: true });
+    } catch (e) { err(res, e); }
+  });
+
+  // Catalog + required-credentials settings (swap in affiliate links here).
+  router.get("/training-settings", async (_req, res) => {
+    try {
+      const { getCourses, DEFAULT_COURSES } = require("./trainingHandler");
+      const courses = await getCourses(tenantId);
+      const tDoc = await T().collection("settings").doc("training").get();
+      res.json({
+        courses, defaults: DEFAULT_COURSES,
+        requiredCredentials: tDoc.exists ? (tDoc.data().requiredCredentials || []) : [],
+        credentialTypes: Object.keys(CREDENTIAL_TYPES),
+      });
+    } catch (e) { err(res, e); }
+  });
+  router.put("/training-settings", async (req, res) => {
+    try {
+      const patch = {};
+      if (req.body.courses !== undefined) patch.courses = req.body.courses;
+      if (req.body.requiredCredentials !== undefined) {
+        const bad = req.body.requiredCredentials.filter((t) => !CREDENTIAL_TYPES[t]);
+        if (bad.length) return res.status(400).json({ error: `Unknown credential types: ${bad.join(", ")}` });
+        patch.requiredCredentials = req.body.requiredCredentials;
+      }
+      if (!Object.keys(patch).length) return res.status(400).json({ error: "Nothing to update. Allowed: courses, requiredCredentials" });
+      await T().collection("settings").doc("training").set(patch, { merge: true });
+      res.json({ ok: true });
+    } catch (e) { err(res, e); }
+  });
+
   // ---------- Exports ----------
   // GET /api/export/payroll.csv?weekStart=YYYY-MM-DD — Xero-style timesheet import
   router.get("/export/payroll.csv", async (req, res) => {

@@ -197,6 +197,9 @@
   .workercol{cursor:pointer}
   td.workercol:hover .wname{text-decoration:underline;text-underline-offset:3px}
 
+  .enrolbtn{background:var(--paper);border:1px solid var(--steel);border-radius:99px;color:var(--steel);
+    font-size:12.5px;font-weight:700;padding:4px 12px;white-space:nowrap}
+  .enrolbtn:hover{background:var(--steel);color:#fff}
   .toast{
     position:fixed;top:14px;left:50%;transform:translateX(-50%);z-index:50;
     background:var(--steel);color:#fff;border-radius:99px;padding:10px 20px;
@@ -231,6 +234,11 @@
     <section class="alerts" aria-labelledby="alertsHead">
       <h3 id="alertsHead">Credential wallet — expiring &amp; expired</h3>
       <div id="alertList"><span class="empty">All credentials current.</span></div>
+    </section>
+
+    <section class="alerts" aria-labelledby="gapsHead">
+      <h3 id="gapsHead">Accredited training — gaps</h3>
+      <div id="gapList"><span class="empty">No required credentials configured yet.</span></div>
     </section>
   </main>
 
@@ -398,6 +406,7 @@ async function load(retried){
     renderAlerts(DEMO_ALERTS);
   }
   render();
+  loadGaps();
 }
 function seedDemoShifts(){
   const s=[]; let n=0;
@@ -480,6 +489,38 @@ function render(){
     flags+=`<div class="flag amber">⚠ Some pay rates are estimates — verify against the current Fair Work pay guide before pay run.</div>`;
   document.getElementById("docketFlags").innerHTML=flags;
 }
+
+async function loadGaps(){
+  const el=document.getElementById("gapList");
+  if(DEMO){
+    el.innerHTML=renderGapRows([
+      {worker:"Binod T.", credential:"RSA / RCG", status:"expired", courseId:"rsa", workerId:"w3", phone:"6140000000"},
+      {worker:"Jess K.", credential:"Food Safety Supervisor", status:"missing", courseId:"fss", workerId:"w4", phone:"6140000001"},
+    ]);
+    return;
+  }
+  try{
+    const r=await fetch(api("/training-gaps")); if(!r.ok) throw 0;
+    const j=await r.json();
+    if(!j.required.length){ el.innerHTML='<span class="empty">No required credentials configured — set them via PUT /api/core/training-settings.</span>'; return; }
+    el.innerHTML=j.gaps.length?renderGapRows(j.gaps):'<span class="empty">Everyone holds the required credentials. ✅</span>';
+  }catch(e){ el.innerHTML='<span class="empty">Couldn\u2019t load gaps.</span>'; }
+}
+function renderGapRows(gaps){
+  return gaps.map(g=>`
+    <div class="alert ${g.status==="expired"?"expired":"expiring"}">
+      <span><strong>${esc(g.worker)}</strong> — ${esc(g.credential)} <span class="exp">${g.status}</span></span>
+      ${g.courseId&&g.phone?`<button class="enrolbtn" data-enrol="${g.courseId}" data-worker="${g.workerId}">Send enrol link</button>`:""}
+    </div>`).join("");
+}
+document.getElementById("gapList").addEventListener("click",async e=>{
+  const b=e.target.closest("[data-enrol]"); if(!b) return;
+  if(DEMO){ toast("Demo: enrol link would be sent on WhatsApp"); return; }
+  b.disabled=true;
+  const r=await fetch(api("/send-enrol"),{method:"POST",headers:{"Content-Type":"application/json"},
+    body:JSON.stringify({workerId:b.dataset.worker,courseId:b.dataset.enrol})});
+  toast(r.ok?"Enrol link sent on WhatsApp":"Send failed — check the worker has a number"); b.disabled=false;
+});
 
 function renderAlerts(alerts){
   const el=document.getElementById("alertList");

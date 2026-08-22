@@ -42,3 +42,18 @@ Then at each time (venue timezone, default Australia/Sydney) those phones get "�
 - Translations (NE/ZH) are working drafts — have a native speaker review before relying on them for formal induction evidence.
 - Traceability (supplier/batch at receiving) is the minimal `delivery` log for now; batch-level capture is a Phase 4 candidate.
 - KitchenFounder Pro bundling is a Shopify-side action, not code: create a 100%-off single-use discount per Hospitality Edition venue for the membership product, and record the redemption against the tenant.
+
+---
+
+## Phase 5a addendum — Accredited RTO loop (added 22 Aug 2026)
+The RTO connection is a loop, not an API (most Australian RTOs have none):
+**gap → enrol link (WhatsApp) → external accredited course → certificate photo → wallet → roster guard lifts.**
+
+- Worker: `enrol` lists accredited courses; `enrol rsa` sends the link + "photo me the certificate when done".
+- Manager: `/roster` now has an "Accredited training — gaps" panel: who's missing/expired on required credentials, with a one-tap **Send enrol link** button.
+- Configure required credentials + swap affiliate/partner links in:
+  `PUT /api/core/training-settings` → `{ "requiredCredentials": ["rsa","fss"], "courses": [...] }`
+  Defaults link to official directories (Liquor & Gaming NSW, NSW Food Authority, SafeWork NSW) — replace with your affiliate/partner URLs when agreements land.
+- Partnership shortlist to pursue commercially: AIFS (food safety affiliate), Express Online Training (multi-course affiliate), Allens Training partner network (first aid delivered under their RTO), Evolution Hospitality (warm contact — your own FSS provider). Confirm current program terms with each.
+- State caution baked into the defaults: NSW does not accept interstate online RSAs, and FSS must come from NSW-approved providers.
+- In-house modules (`train`) remain induction-level evidence only — never represent them as the accredited cert.

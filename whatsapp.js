@@ -106,4 +106,37 @@ async function sendLocationRequest(to, body, options = {}) {
   return json;
 }
 
-module.exports = { sendText, sendLocationRequest };
+/**
+ * Download a media attachment (photo) a user sent us, by its media ID.
+ * Two-step per Meta's docs: resolve the media ID to a short-lived CDN URL,
+ * then fetch the binary with the same bearer token.
+ *
+ * @param {string} mediaId  message.image.id from the webhook payload
+ * @param {{token?: string}} [options]  Per-tenant token override
+ * @returns {Promise<{buffer: Buffer, mimeType: string}|null>} null on any failure
+ */
+async function fetchMediaBinary(mediaId, options = {}) {
+  const token = options.token || process.env.WHATSAPP_TOKEN;
+  if (!token) return null;
+  try {
+    const metaRes = await fetch(`https://graph.facebook.com/${GRAPH_VERSION}/${mediaId}`, {
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    const meta = await metaRes.json();
+    if (!metaRes.ok || !meta.url) {
+      console.error("[media] resolve failed:", metaRes.status, JSON.stringify(meta));
+      return null;
+    }
+    const binRes = await fetch(meta.url, { headers: { Authorization: `Bearer ${token}` } });
+    if (!binRes.ok) {
+      console.error("[media] download failed:", binRes.status);
+      return null;
+    }
+    return { buffer: Buffer.from(await binRes.arrayBuffer()), mimeType: meta.mime_type || "image/jpeg" };
+  } catch (err) {
+    console.error("[media] error:", err.message);
+    return null;
+  }
+}
+
+module.exports = { sendText, sendLocationRequest, fetchMediaBinary };

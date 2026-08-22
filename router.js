@@ -45,6 +45,8 @@ const DEFAULT_TENANT_ID = process.env.DEFAULT_TENANT_ID || "demo-venue";
  *   support). Null in a single-venue deployment — every downstream call
  *   then falls back to the WHATSAPP_PHONE_NUMBER_ID/WHATSAPP_TOKEN env vars.
  */
+const { handleWalletCommand, handleWalletReply, handleCredentialPhoto } = require("./walletHandler");
+
 async function handleIncoming(message, deps, tenantContext = null) {
   const { staffStore, pendingActions } = deps;
   const from = message.from;
@@ -128,6 +130,15 @@ async function handleIncoming(message, deps, tenantContext = null) {
       await handleSpendCommand(from, staff, body, deps, sendOpts);
       return;
     }
+    // Credential wallet — "wallet" lists; and while a photo draft is pending
+    // (10-min window), yes/no/corrections belong to it. handleWalletReply
+    // returns false when nothing is pending, so it can never shadow the
+    // availability words or a shift-offer yes/no.
+    if (body === "wallet") {
+      await handleWalletCommand(from, staff, tenantId, deps, sendOpts);
+      return;
+    }
+    if (await handleWalletReply(from, staff, body, tenantId, deps, sendOpts)) return;
     // The weekly availability words — rungs 1, 2 and 5 of the capture ladder.
     if (looksLikeAvailabilityReply(body)) {
       if (TODAY_RE.test(body)) await handleFreeToday(from, staff, deps, sendOpts);
@@ -152,7 +163,8 @@ async function handleIncoming(message, deps, tenantContext = null) {
       `Hi ${staff.name} — commands: "in"/"out" to clock in/out, "break"/"back" for breaks, ` +
         `"yes"/"no" to answer a shift offer, "same" to repeat last week's availability, ` +
         `"today" to join today's pool, "mon am pm, fri all" to set your week, ` +
-        `"roster" to see your shifts, "spend 420 bidfood" to log a delivery.`,
+        `"roster" to see your shifts, "wallet" to see your credentials (or send a photo of one to file it), ` +
+        `"spend 420 bidfood" to log a delivery.`,
       sendOpts
     );
     return;
@@ -169,7 +181,7 @@ async function handleIncoming(message, deps, tenantContext = null) {
   }
 
   if (type === "image") {
-    await sendText(from, `Got the photo, ${staff.name} — invoice/stock/P&L photo handling arrives in a later build step.`, sendOpts);
+    await handleCredentialPhoto(from, staff, message.image, tenantId, deps, sendOpts);
     return;
   }
 

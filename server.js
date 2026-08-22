@@ -1511,6 +1511,15 @@ app.get("/roster", (_req, res) => {
   res.sendFile(path.join(__dirname, "public", "roster.html"));
 });
 
+// Credential expiry nudges (Phase 2) — 60/30/7-day and expired reminders to
+// workers on WhatsApp. No-ops without Firestore; WALLET_NUDGES_DISABLED=1 off.
+const { startWalletNudges } = require("./walletNudges");
+startWalletNudges({
+  db: getFirestoreDb(),
+  tenantId: DASHBOARD_TENANT_ID,
+  send: (phone, text) => sendText(phone, text),
+});
+
 // Fail fast on missing configuration rather than failing weirdly later.
 const required = ["WHATSAPP_TOKEN", "WHATSAPP_PHONE_NUMBER_ID", "WHATSAPP_VERIFY_TOKEN", "META_APP_SECRET"];
 const missing = required.filter((k) => !process.env[k]);

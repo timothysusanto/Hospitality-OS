@@ -18,18 +18,7 @@
 const express = require("express");
 const { costShift, costRoster, getAward, listUnverifiedRates } = require("./award-engine");
 
-// Credential types that block rostering when expired (roster guard)
-const BLOCKING_CREDENTIALS = ["visa", "rsa", "white_card", "ndis_screening"];
-const CREDENTIAL_TYPES = {
-  visa:            { label: "Visa / right to work", blocking: true },
-  rsa:             { label: "RSA / RCG",            blocking: true },
-  white_card:      { label: "White Card",           blocking: true },
-  ndis_screening:  { label: "NDIS worker screening",blocking: true },
-  police_check:    { label: "Police check",         blocking: false },
-  fss:             { label: "Food Safety Supervisor", blocking: false },
-  first_aid:       { label: "First aid",            blocking: false },
-  drivers_licence: { label: "Driver licence",       blocking: false },
-};
+const { CREDENTIAL_TYPES } = require("./credentialTypes");
 
 module.exports = function coreOS({ db, tenantId, sendWhatsApp }) {
   const router = express.Router();
@@ -60,7 +49,7 @@ module.exports = function coreOS({ db, tenantId, sendWhatsApp }) {
       const today = new Date().toISOString().slice(0, 10);
       const soon = addDays(today, 30);
       for (const w of workers) {
-        const mine = creds.filter((c) => c.workerId === w.id);
+        const mine = creds.filter((c) => c.workerId === w.id || (c.workerPhone && w.phone && c.workerPhone === w.phone));
         w.credentialStatus =
           mine.some((c) => c.expiryDate && c.expiryDate < today && (CREDENTIAL_TYPES[c.type] || {}).blocking) ? "expired"
           : mine.some((c) => c.expiryDate && c.expiryDate < soon) ? "expiring"
@@ -188,8 +177,15 @@ module.exports = function coreOS({ db, tenantId, sendWhatsApp }) {
   // ---------- Credential wallet ----------
   router.get("/wallet/:workerId", async (req, res) => {
     try {
-      const snap = await T().collection("credentials").where("workerId", "==", req.params.workerId).get();
-      res.json({ credentials: snap.docs.map((d) => ({ id: d.id, ...d.data() })), types: CREDENTIAL_TYPES });
+      const wDoc = await T().collection("workers").doc(req.params.workerId).get();
+      const phone = wDoc.exists ? wDoc.data().phone : null;
+      const [byId, byPhone] = await Promise.all([
+        T().collection("credentials").where("workerId", "==", req.params.workerId).get(),
+        phone ? T().collection("credentials").where("workerPhone", "==", phone).get() : { docs: [] },
+      ]);
+      const seen = new Map();
+      [...byId.docs, ...byPhone.docs].forEach((d) => seen.set(d.id, { id: d.id, ...d.data() }));
+      res.json({ credentials: [...seen.values()], types: CREDENTIAL_TYPES });
     } catch (e) { err(res, e); }
   });
 
@@ -197,10 +193,13 @@ module.exports = function coreOS({ db, tenantId, sendWhatsApp }) {
     try {
       const { type, number, expiryDate, fileUrl } = req.body;
       if (!type || !CREDENTIAL_TYPES[type]) return res.status(400).json({ error: "Valid credential type is required", types: Object.keys(CREDENTIAL_TYPES) });
+      const wDoc = await T().collection("workers").doc(req.params.workerId).get();
+      const w = wDoc.exists ? wDoc.data() : {};
       const ref = await T().collection("credentials").add({
-        workerId: req.params.workerId, type, label: CREDENTIAL_TYPES[type].label,
+        workerId: req.params.workerId, workerPhone: w.phone || null, workerName: w.name || null,
+        type, label: CREDENTIAL_TYPES[type].label,
         number: number || null, expiryDate: expiryDate || null, fileUrl: fileUrl || null,
-        verifiedBy: req.body.actor || null, createdAt: now(),
+        verifiedBy: req.body.actor || null, source: "dashboard", nudgesSent: {}, createdAt: now(),
       });
       res.json({ id: ref.id });
     } catch (e) { err(res, e); }
@@ -214,13 +213,13 @@ module.exports = function coreOS({ db, tenantId, sendWhatsApp }) {
       const [credSnap, workerSnap] = await Promise.all([
         T().collection("credentials").get(), T().collection("workers").get(),
       ]);
-      const names = {};
-      workerSnap.docs.forEach((d) => (names[d.id] = d.data().name));
+      const names = {}, phoneNames = {};
+      workerSnap.docs.forEach((d) => { const w = d.data(); names[d.id] = w.name; if (w.phone) phoneNames[w.phone] = w.name; });
       const alerts = credSnap.docs
         .map((d) => ({ id: d.id, ...d.data() }))
         .filter((c) => c.expiryDate && c.expiryDate <= horizon)
         .map((c) => ({
-          workerId: c.workerId, worker: names[c.workerId] || "Unknown",
+          workerId: c.workerId, worker: names[c.workerId] || phoneNames[c.workerPhone] || c.workerName || "Unknown",
           credential: c.label || c.type, expiryDate: c.expiryDate,
           status: c.expiryDate < today ? "expired" : "expiring",
           blocking: (CREDENTIAL_TYPES[c.type] || {}).blocking || false,

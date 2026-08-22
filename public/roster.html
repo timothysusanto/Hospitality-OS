@@ -184,6 +184,19 @@
   .guardnote{font-size:13.5px;border-radius:7px;padding:8px 10px;display:none}
   .guardnote.red{display:block;background:var(--red-bg);color:var(--red);border:1px solid var(--red)}
 
+  /* wallet modal */
+  .cred{display:flex;justify-content:space-between;gap:8px;align-items:baseline;padding:8px 0;border-bottom:1px dashed var(--steel-line);font-size:14.5px}
+  .cred:last-child{border-bottom:none}
+  .cred .exp{font-family:var(--font-docket);font-size:13px;white-space:nowrap}
+  .cred.expired .exp{color:var(--red);font-weight:600}
+  .cred.expiring .exp{color:var(--amber);font-weight:600}
+  .cred .src{font-size:11.5px;color:var(--ink-2);display:block}
+  .wallet-empty{color:var(--ink-2);font-size:14px;padding:6px 0}
+  .addcred{border-top:1px solid var(--steel-line);margin-top:10px;padding-top:12px}
+  .addcred .trow{grid-template-columns:1.4fr 1fr}
+  .workercol{cursor:pointer}
+  td.workercol:hover .wname{text-decoration:underline;text-underline-offset:3px}
+
   .toast{
     position:fixed;top:14px;left:50%;transform:translateX(-50%);z-index:50;
     background:var(--steel);color:#fff;border-radius:99px;padding:10px 20px;
@@ -264,6 +277,28 @@
       <button type="submit" class="btn-primary" id="saveShift">Save shift</button>
     </div>
   </form>
+</dialog>
+
+<dialog id="walletModal">
+  <div class="mhead"><h3 id="walletTitle">Wallet</h3></div>
+  <div class="mbody">
+    <div id="credList"></div>
+    <form class="addcred" id="credForm">
+      <div class="trow" style="margin-bottom:10px">
+        <div class="field"><label for="cType">Add credential</label>
+          <select id="cType" required></select></div>
+        <div class="field"><label for="cExpiry">Expiry</label>
+          <input id="cExpiry" type="date" required></div>
+      </div>
+      <div class="field"><label for="cNumber">Number (optional)</label>
+        <input id="cNumber" type="text" inputmode="text" placeholder="Card / licence no."></div>
+    </form>
+    <p style="font-size:13px;color:var(--ink-2);margin-top:10px">Workers can also file these themselves — they just send a photo of the card to the venue WhatsApp.</p>
+  </div>
+  <div class="mfoot">
+    <button type="button" class="btn-ghost" id="walletClose">Close</button>
+    <button type="submit" form="credForm" class="btn-primary">Save credential</button>
+  </div>
 </dialog>
 
 <div class="toast" id="toast" role="status"></div>
@@ -507,6 +542,63 @@ document.getElementById("publishBtn").onclick=async()=>{
 document.getElementById("prevWeek").onclick=()=>{weekStart=addDays(weekStart,-7);load();};
 document.getElementById("nextWeek").onclick=()=>{weekStart=addDays(weekStart,7);load();};
 document.getElementById("revInput").addEventListener("input",updatePct);
+
+/* ---------- credential wallet ---------- */
+let walletWorker = null;
+const DEMO_CREDS = {
+  w2:[{label:"Visa / right to work",expiryDate:addDays(todayStr(),21),source:"whatsapp"},
+      {label:"Food Safety Supervisor",expiryDate:addDays(todayStr(),400),source:"dashboard"}],
+  w3:[{label:"RSA / RCG",expiryDate:addDays(todayStr(),-6),source:"whatsapp"}],
+};
+document.getElementById("bodyRows").addEventListener("click",e=>{
+  const wc=e.target.closest("td.workercol");
+  if(wc){ const row=wc.parentElement.rowIndex-1; openWallet(workers[row]); }
+});
+async function openWallet(w){
+  if(!w) return;
+  walletWorker=w;
+  document.getElementById("walletTitle").textContent="Wallet — "+w.name;
+  let creds=[], types=null;
+  if(DEMO){ creds=DEMO_CREDS[w.id]||[]; }
+  else{
+    try{ const r=await fetch(api(`/wallet/${w.id}`)); const j=await r.json(); creds=j.credentials||[]; types=j.types; }
+    catch(e){ creds=[]; }
+  }
+  renderCreds(creds);
+  const sel=document.getElementById("cType");
+  const t=types||{visa:{label:"Visa / right to work"},rsa:{label:"RSA / RCG"},white_card:{label:"White Card"},ndis_screening:{label:"NDIS worker screening"},police_check:{label:"Police check"},fss:{label:"Food Safety Supervisor"},first_aid:{label:"First aid"},drivers_licence:{label:"Driver licence"}};
+  sel.innerHTML=Object.entries(t).map(([k,v])=>`<option value="${k}">${esc(v.label)}</option>`).join("");
+  document.getElementById("walletModal").showModal();
+}
+function renderCreds(creds){
+  const el=document.getElementById("credList");
+  if(!creds.length){ el.innerHTML='<div class="wallet-empty">No credentials on file yet.</div>'; return; }
+  const today=todayStr(), soon=addDays(today,30);
+  el.innerHTML=creds
+    .sort((a,b)=>(a.expiryDate||"9999").localeCompare(b.expiryDate||"9999"))
+    .map(c=>{
+      const st=!c.expiryDate?"":c.expiryDate<today?"expired":c.expiryDate<soon?"expiring":"";
+      return `<div class="cred ${st}">
+        <span>${esc(c.label||c.type)}${c.number?` · ${esc(c.number)}`:""}
+          <span class="src">${c.source==="whatsapp"?"filed by worker on WhatsApp":"added on dashboard"}</span></span>
+        <span class="exp">${c.expiryDate?(st==="expired"?"expired ":"exp ")+fmt(c.expiryDate):"no expiry"}</span>
+      </div>`;
+    }).join("");
+}
+document.getElementById("walletClose").onclick=()=>document.getElementById("walletModal").close();
+document.getElementById("credForm").addEventListener("submit",async e=>{
+  e.preventDefault();
+  const body={type:document.getElementById("cType").value,
+    expiryDate:document.getElementById("cExpiry").value,
+    number:document.getElementById("cNumber").value||null};
+  if(DEMO){
+    (DEMO_CREDS[walletWorker.id]=DEMO_CREDS[walletWorker.id]||[]).push({label:document.getElementById("cType").selectedOptions[0].text,...body,source:"dashboard"});
+    renderCreds(DEMO_CREDS[walletWorker.id]); toast("Credential saved (demo)"); return;
+  }
+  const r=await fetch(api(`/wallet/${walletWorker.id}/credential`),{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+  if(r.ok){ toast("Credential saved"); openWallet(walletWorker); load(); }
+  else toast("Save failed");
+});
 
 /* ---------- utils ---------- */
 function mondayOf(d){const x=new Date(d);const day=(x.getDay()+6)%7;x.setDate(x.getDate()-day);return x.toISOString().slice(0,10);}

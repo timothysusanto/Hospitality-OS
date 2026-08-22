@@ -269,4 +269,4 @@ function fmtDate(ds) {
   return new Date(ds + "T12:00:00").toLocaleDateString("en-AU", { day: "numeric", month: "short", year: "numeric" });
 }
 
-module.exports = { handleWalletCommand, handleWalletReply, handleCredentialPhoto };
+module.exports = { handleWalletCommand, handleWalletReply, handleCredentialPhoto, storeImage };

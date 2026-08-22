@@ -46,6 +46,11 @@ const DEFAULT_TENANT_ID = process.env.DEFAULT_TENANT_ID || "demo-venue";
  *   then falls back to the WHATSAPP_PHONE_NUMBER_ID/WHATSAPP_TOKEN env vars.
  */
 const { handleWalletCommand, handleWalletReply, handleCredentialPhoto } = require("./walletHandler");
+const {
+  handleTempsCommand, handleFoodSafetyReply, handleCleanCommand,
+  handleDeliveryCommand, handleFoodSafetyPhoto,
+} = require("./foodSafetyHandler");
+const { handleTrainCommand, handleTrainingReply } = require("./trainingHandler");
 
 async function handleIncoming(message, deps, tenantContext = null) {
   const { staffStore, pendingActions } = deps;
@@ -138,7 +143,28 @@ async function handleIncoming(message, deps, tenantContext = null) {
       await handleWalletCommand(from, staff, tenantId, deps, sendOpts);
       return;
     }
+    // Food safety diary (Hospitality Edition) — guided temp runs, cleaning
+    // checklist, delivery receiving. Same pattern as the wallet: fixed words
+    // first, then pending-gated reply hooks that return false when idle.
+    if (body === "temps") {
+      await handleTempsCommand(from, staff, tenantId, deps, sendOpts);
+      return;
+    }
+    if (body === "clean" || body.startsWith("clean ")) {
+      await handleCleanCommand(from, staff, body, tenantId, deps, sendOpts);
+      return;
+    }
+    if (body.startsWith("delivery")) {
+      await handleDeliveryCommand(from, staff, body, tenantId, deps, sendOpts);
+      return;
+    }
+    if (body === "train" || body.startsWith("train ")) {
+      await handleTrainCommand(from, staff, body, tenantId, deps, sendOpts);
+      return;
+    }
     if (await handleWalletReply(from, staff, body, tenantId, deps, sendOpts)) return;
+    if (await handleFoodSafetyReply(from, staff, body, tenantId, deps, sendOpts)) return;
+    if (await handleTrainingReply(from, staff, body, tenantId, deps, sendOpts)) return;
     // The weekly availability words — rungs 1, 2 and 5 of the capture ladder.
     if (looksLikeAvailabilityReply(body)) {
       if (TODAY_RE.test(body)) await handleFreeToday(from, staff, deps, sendOpts);
@@ -164,6 +190,7 @@ async function handleIncoming(message, deps, tenantContext = null) {
         `"yes"/"no" to answer a shift offer, "same" to repeat last week's availability, ` +
         `"today" to join today's pool, "mon am pm, fri all" to set your week, ` +
         `"roster" to see your shifts, "wallet" to see your credentials (or send a photo of one to file it), ` +
+        `"temps" to run temperature checks, "clean" for the cleaning list, "train" for training modules, ` +
         `"spend 420 bidfood" to log a delivery.`,
       sendOpts
     );
@@ -181,6 +208,9 @@ async function handleIncoming(message, deps, tenantContext = null) {
   }
 
   if (type === "image") {
+    // A photo within 10 minutes of a diary entry attaches to it (probe
+    // readings, delivery dockets); otherwise it's a credential for the wallet.
+    if (await handleFoodSafetyPhoto(from, staff, message.image, tenantId, deps, sendOpts)) return;
     await handleCredentialPhoto(from, staff, message.image, tenantId, deps, sendOpts);
     return;
   }

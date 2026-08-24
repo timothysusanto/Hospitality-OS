@@ -15,6 +15,7 @@ const CREDENTIAL_TYPES = {
   rsa:             { label: "RSA / RCG",                blocking: true,  aliases: ["rsa", "rcg"] },
   white_card:      { label: "White Card",               blocking: true,  aliases: ["white", "whitecard", "white card"] },
   ndis_screening:  { label: "NDIS worker screening",    blocking: true,  aliases: ["ndis"] },
+  security_licence:{ label: "Security licence",         blocking: true,  aliases: ["security", "security licence", "security license", "guard licence", "crowd control"] },
   police_check:    { label: "Police check",             blocking: false, aliases: ["police", "police check"] },
   fss:             { label: "Food Safety Supervisor",   blocking: false, aliases: ["fss", "food safety", "foodsafety"] },
   first_aid:       { label: "First aid",                blocking: false, aliases: ["firstaid", "first aid", "cpr"] },

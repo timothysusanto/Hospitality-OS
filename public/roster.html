@@ -163,6 +163,27 @@
   .alert.expiring .exp{color:var(--amber);font-weight:600}
   .alerts .empty{color:var(--ink-2);font-size:14px}
 
+  /* Live attendance strip — bridges the WhatsApp clock-in system */
+  .live-strip{margin:0 0 18px}
+  .live-strip h3{display:flex;align-items:center;gap:10px;flex-wrap:wrap}
+  .live-pill{font-family:var(--font-docket);font-size:12px;letter-spacing:0;text-transform:none;background:var(--green-bg);color:var(--green);border-radius:99px;padding:2px 10px;font-weight:600}
+  .live-pill.warn{background:var(--amber-bg);color:var(--amber)}
+  .live-link{margin-left:auto;font-family:var(--font-ui);font-size:12px;letter-spacing:.02em;text-transform:none;font-weight:600;color:var(--steel);text-decoration:none}
+  .live-link:hover{text-decoration:underline}
+  .live-rows{display:flex;flex-direction:column;gap:6px}
+  .live-row{display:flex;align-items:center;gap:12px;padding:9px 12px;background:var(--docket);border:1px solid var(--steel-line);border-radius:8px;font-size:14px;flex-wrap:wrap}
+  .live-row.flagged{background:var(--amber-bg);border-color:var(--amber)}
+  .live-row .ln{font-weight:700;min-width:110px}
+  .live-row .lm{color:var(--ink-2);font-size:12px;flex:1;min-width:140px}
+  .live-row .lt{font-family:var(--font-docket);font-weight:600;color:var(--green);font-size:13px}
+  .live-row.flagged .lt{color:var(--amber)}
+  .live-row button{border-radius:7px;padding:7px 12px;font-size:12px;font-weight:600;font-family:var(--font-docket);cursor:pointer}
+  .live-row button:disabled{opacity:.55;cursor:default}
+  .live-row .l-out{background:var(--paper);border:1px solid var(--steel-line);color:var(--steel)}
+  .live-row .l-out:hover{border-color:var(--steel)}
+  .live-row .l-ok{background:var(--green);border:none;color:#fff}
+  .live-row .l-cut{background:transparent;border:1px solid var(--red);color:var(--red)}
+
   /* ============ Modal ============ */
   dialog{
     border:1px solid var(--steel-line);border-radius:14px;padding:0;
@@ -224,6 +245,11 @@
 
 <div class="wrap">
   <main>
+    <section class="alerts live-strip" aria-labelledby="liveHead">
+      <h3 id="liveHead">Clocked in now <span class="live-pill" id="livePill">—</span><a class="live-link" href="/dashboard">Full dashboard ›</a></h3>
+      <div id="liveList"><span class="empty">Checking who's on…</span></div>
+    </section>
+
     <div class="grid-scroll">
       <table id="rosterTable" aria-label="Weekly roster">
         <thead><tr id="headRow"></tr></thead>
@@ -743,7 +769,63 @@ function set(id,v){document.getElementById(id).textContent=v;}
 function esc(s){return String(s).replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));}
 function toast(msg){const t=document.getElementById("toast");t.textContent=msg;t.style.display="block";clearTimeout(t._h);t._h=setTimeout(()=>t.style.display="none",3200);}
 
-load();
+/* ---------- Live attendance bridge ----------
+   The WhatsApp clock-in system (pre-existing) writes attendance events to the
+   top-level `shifts` collection and serves them via /api/dashboard. This
+   page's planned roster lives in a *different* tenants/{id}/shifts collection
+   under /api/core. Same word, two datasets — see handoff doc §5. This panel
+   reads the attendance side so a manager mid-service never has to leave
+   /roster to see who's actually on, clock someone out, or clear a flagged
+   out-of-radius clock-in. Both keys are the same MANAGER_DASHBOARD_PASSWORD. */
+async function loadLive(){
+  const box=document.getElementById("liveList"), pill=document.getElementById("livePill");
+  try{
+    const r=await fetch(`/api/dashboard?key=${encodeURIComponent(KEY)}`);
+    if(!r.ok) throw 0;
+    const {staff,shifts}=await r.json();
+    const name=p=>{const s=staff.find(x=>x.phone===p);return s?s.name:p;};
+    const dept=p=>{const s=staff.find(x=>x.phone===p);return s?(s.department||s.role||""):"";};
+    const dur=ms=>{const m=Math.max(0,Math.floor(ms/60000));return `${Math.floor(m/60)}h ${String(m%60).padStart(2,"0")}m`;};
+    const clock=iso=>new Date(iso).toLocaleTimeString("en-AU",{hour:"2-digit",minute:"2-digit"});
+    const on=shifts.filter(s=>!s.clockOut&&!s.clockIn.flaggedForReview);
+    const flagged=shifts.filter(s=>!s.clockOut&&s.clockIn.flaggedForReview);
+    pill.textContent=`${on.length} on`+(flagged.length?` · ${flagged.length} flagged`:"");
+    pill.classList.toggle("warn",flagged.length>0);
+    if(!on.length&&!flagged.length){box.innerHTML=`<span class="empty">Nobody's clocked in. Rows appear the moment someone texts "in".</span>`;return;}
+    box.innerHTML=`<div class="live-rows">${
+      flagged.map(s=>`<div class="live-row flagged">
+        <span class="ln">${esc(name(s.staffPhone))}</span>
+        <span class="lm">📍 ${esc(s.clockIn.distanceMeters)}m from ${esc(s.siteName||"the venue")} · tried ${clock(s.clockIn.time)}</span>
+        <span class="lt">FLAGGED</span>
+        <button class="l-ok" onclick="liveReview('${esc(s.shiftId)}',true,this)">Approve</button>
+        <button class="l-cut" onclick="liveReview('${esc(s.shiftId)}',false,this)">Cut</button>
+      </div>`).join("")}${
+      on.map(s=>`<div class="live-row">
+        <span class="ln">${esc(name(s.staffPhone))}</span>
+        <span class="lm">${esc(dept(s.staffPhone))} · on since ${clock(s.clockIn.time)}</span>
+        <span class="lt">⏱ ${dur(Date.now()-new Date(s.clockIn.time).getTime())}</span>
+        <button class="l-out" onclick="liveClockOut('${esc(s.shiftId)}',this)">Clock out</button>
+      </div>`).join("")}</div>`;
+  }catch(e){
+    box.innerHTML=`<span class="empty">Live attendance unavailable — <a class="live-link" style="margin:0" href="/dashboard">open the full dashboard</a>.</span>`;
+    pill.textContent="—";pill.classList.remove("warn");
+  }
+}
+async function liveClockOut(id,btn){
+  btn.disabled=true;
+  const r=await fetch(`/api/shifts/${encodeURIComponent(id)}/close?key=${encodeURIComponent(KEY)}`,{method:"POST"}).catch(()=>null);
+  if(r&&r.ok){toast("Clocked out");loadLive();}
+  else{btn.disabled=false;toast("Couldn't clock out — try the full dashboard");}
+}
+async function liveReview(id,approve,btn){
+  btn.disabled=true;
+  const r=await fetch(`/api/shifts/${encodeURIComponent(id)}/review?key=${encodeURIComponent(KEY)}`,{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({approve})}).catch(()=>null);
+  if(r&&r.ok){toast(approve?"Approved — they're on the board":"Cut");loadLive();}
+  else{btn.disabled=false;toast("Couldn't update — try the full dashboard");}
+}
+
+load().finally(loadLive);
+setInterval(()=>{if(!document.hidden)loadLive();},30000);
 </script>
 </body>
 </html>

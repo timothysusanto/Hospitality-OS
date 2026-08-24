@@ -1,7 +1,7 @@
 {
   "name": "hospitality-os",
   "version": "0.1.0",
-  "description": "HospitalityOS — WhatsApp-first operations platform for F&B. Step 1: webhook skeleton.",
+  "description": "Shiftfolk — WhatsApp-first workforce OS for deskless teams (cleaning, security, aged care, hospitality).",
   "main": "server.js",
   "type": "commonjs",
   "engines": {

@@ -1551,6 +1551,6 @@ if (!process.env.MANAGER_DASHBOARD_PASSWORD) {
 }
 
 app.listen(PORT, () => {
-  console.log(`HospitalityOS webhook skeleton listening on :${PORT}`);
+  console.log(`Shiftfolk listening on :${PORT}`);
   console.log(`Webhook URL path: /webhook/whatsapp`);
 });

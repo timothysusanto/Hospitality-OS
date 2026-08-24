@@ -4,7 +4,7 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
 <meta name="theme-color" content="#FFFFFF" />
-<title>Manager Dashboard — Deskless Workforce OS</title>
+<title>Manager Dashboard — Shiftfolk</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Archivo:wdth,wght@75..100,400..800&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
 <style>
@@ -236,7 +236,7 @@
   .hours-fill{height:100%;background:var(--steel);border-radius:4px}
   .hours-val{width:58px;text-align:right;font-size:12px;color:var(--ink-2);flex-shrink:0}
 
-  /* ============ Panels (cost settings, larder, reports) ============ */
+  /* ============ Panels (cost settings, reports) ============ */
   .pen-panel{border:1px solid var(--steel-line);border-radius:var(--radius);background:var(--paper);padding:20px}
   .pen-presets{display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap}
   .preset-btn{
@@ -299,7 +299,7 @@
   .modal-actions .cancel:hover{border-color:var(--steel);color:var(--steel)}
   .modal .err{color:var(--red);font-size:12px;min-height:14px;margin-top:8px}
 
-  /* ============ Larder / reports rows ============ */
+  /* ============ Reports rows ============ */
   .larder-add{display:flex;gap:10px;flex-wrap:wrap;align-items:flex-end;margin-bottom:16px}
   .larder-add .field{margin:0}
   .larder-add input{width:130px}
@@ -356,7 +356,7 @@
   <div class="lamp-glow"></div>
   <div class="card">
     <div class="lamp-fixture" style="position: relative; margin: 0 auto 34px; transform: none; left: auto;"></div>
-    <h1 class="bebas">Deskless Workforce OS</h1>
+    <h1 class="bebas">Shiftfolk</h1>
     <p class="mono">Manager key to open the dashboard.</p>
     <input id="keyInput" type="password" placeholder="Manager key" autocomplete="current-password" />
     <button onclick="submitKey()">Open dashboard</button>
@@ -367,7 +367,7 @@
 
 <div class="wrap" id="dashboard" style="display:none;">
   <header>
-    <span class="brand bebas">Deskless Workforce OS</span>
+    <span class="brand bebas">Shiftfolk</span>
     <span class="venue mono" id="venueLine">—</span>
     <span class="grow"></span>
     <span id="serviceClock" class="bebas">--:--:--</span>
@@ -454,8 +454,6 @@
       <span><span id="rosterCost">$0</span> <span style="color:var(--dim);">rostered this week</span></span>
       <span><label>Revenue forecast</label><input id="revenueInput" type="number" min="0" placeholder="e.g. 18000" onchange="revenueChanged()" /></span>
       <span id="labourPct"></span>
-      <span id="foodPct"></span>
-      <span id="primePct"></span>
       <span class="cost-note">Costing uses your Cost Settings below (weekend and holiday multipliers, weekly overtime) on flat hourly rates. Planning estimates, not payroll. Slot hours are set in Cost Settings below; double-click any board cell for exact 24h times.</span>
     </div>
     <p class="inline-msg" id="missingRates"></p>
@@ -466,34 +464,6 @@
     <div class="stamp"><h2>The Numbers — Last 7 Days</h2><div class="rule"></div></div>
     <div class="num-grid" id="vaGrid"></div>
     <div class="hours-list" id="hoursList"></div>
-  </section>
-
-  <section>
-    <div class="stamp"><h2>Purchases — Food Cost</h2><div class="rule"></div></div>
-    <div class="pen-panel">
-      <div class="larder-add">
-        <div class="field"><label>Date</label><input id="purchDate" type="date" /></div>
-        <div class="field"><label>Amount ($)</label><input id="purchAmount" type="number" min="0" step="0.01" placeholder="e.g. 420" /></div>
-        <div class="field grow"><label>Supplier</label><input id="purchSupplier" type="text" placeholder="e.g. Bidfood" /></div>
-        <button onclick="addPurchase()">Log purchase</button>
-        <span class="inline-msg" id="purchStatus" style="margin: 0;"></span>
-      </div>
-      <div class="table-wrap">
-        <table class="data">
-          <thead><tr><th>Date</th><th>Supplier</th><th>Source</th><th style="text-align:right;">Amount</th><th></th></tr></thead>
-          <tbody id="purchBody"></tbody>
-        </table>
-      </div>
-      <div class="stock-row">
-        <div class="field"><label>Opening stock ($, optional)</label><input id="openingStock" type="number" min="0" step="1" onchange="stockChanged()" /></div>
-        <div class="field"><label>Closing stock ($, optional)</label><input id="closingStock" type="number" min="0" step="1" onchange="stockChanged()" /></div>
-      </div>
-      <p class="stock-note">
-        Food cost uses purchases ÷ revenue by default. Enter opening and closing stock values to switch this week to the
-        true COGS formula: (opening + purchases − closing) ÷ revenue. Crew can log deliveries from WhatsApp with
-        "spend 420 bidfood" — entries appear here instantly.
-      </p>
-    </div>
   </section>
 
   <section>
@@ -545,8 +515,7 @@
       <p class="stock-note">
         Payroll CSV: every closed shift in the range with effective times (amendments applied, originals included for audit),
         paid hours, rate, weekend/holiday multiplier, weekly overtime lines and per-person totals — ready for the payment run.
-        Weekly P&amp;L CSV: revenue, actual labour, food purchases/COGS, and labour/food/prime percentages for the week
-        containing the "From" date. Pay figures are planning estimates on your configured rates — verify before paying.
+        Weekly P&amp;L CSV: revenue, actual labour and cost percentages for the week containing the "From" date. Pay figures are planning estimates on your configured rates — verify before paying.
       </p>
     </div>
   </section>
@@ -1478,7 +1447,6 @@
         renderSites();
       }
       renderRoster();
-      loadPurchases();
     } catch (err) {
       document.getElementById("rosterBody").innerHTML =
         `<tr><td colspan="8" style="text-align:left; padding: 14px; color: var(--dim);">Board didn't load — refresh to try again.</td></tr>`;
@@ -1555,14 +1523,6 @@
     const revInput = document.getElementById("revenueInput");
     if (document.activeElement !== revInput) {
       revInput.value = roster.revenueForecast != null ? roster.revenueForecast : "";
-    }
-    const openInput = document.getElementById("openingStock");
-    if (document.activeElement !== openInput) {
-      openInput.value = roster.openingStock != null ? roster.openingStock : "";
-    }
-    const closeInput = document.getElementById("closingStock");
-    if (document.activeElement !== closeInput) {
-      closeInput.value = roster.closingStock != null ? roster.closingStock : "";
     }
     updateCosting();
   }
@@ -1740,8 +1700,6 @@
           week: rosterWeekStart,
           assignments: rosterData.roster.assignments || {},
           revenueForecast: document.getElementById("revenueInput").value === "" ? null : Number(document.getElementById("revenueInput").value),
-          openingStock: document.getElementById("openingStock").value === "" ? null : Number(document.getElementById("openingStock").value),
-          closingStock: document.getElementById("closingStock").value === "" ? null : Number(document.getElementById("closingStock").value),
         }),
       });
     } catch (err) {
@@ -1842,115 +1800,13 @@
       ? `<span class="fail">No wage rate set for: ${missing.map(esc).join(", ")} — their shifts cost $0 in this total.</span>`
       : "";
 
-    // Food cost % and prime cost %
-    const { rev: fRev, cogs, hasStocktake } = foodCostForWeek();
-    const foodEl = document.getElementById("foodPct");
-    const primeEl = document.getElementById("primePct");
-    let labourPctVal = null, foodPctVal = null;
-    if (rev > 0 && total > 0) labourPctVal = (total / rev) * 100;
-    if (fRev > 0 && cogs > 0) {
-      foodPctVal = (cogs / fRev) * 100;
-      foodEl.innerHTML = `<span class="${foodPctVal > 32 ? "pct-warn" : "pct-ok"}">${foodPctVal.toFixed(1)}% food</span>` +
-        `<span style="color:var(--dim); font-size:11px;"> ${hasStocktake ? "(COGS basis)" : "(purchases basis)"}</span>`;
-    } else {
-      foodEl.textContent = "";
-    }
-    if (labourPctVal != null && foodPctVal != null) {
-      const prime = labourPctVal + foodPctVal;
-      primeEl.innerHTML = `<span class="${prime > 60 ? "pct-warn" : "pct-ok"}">${prime.toFixed(1)}% prime</span>`;
-    } else {
-      primeEl.textContent = "";
-    }
     renderVariance();
   }
   function revenueChanged() {
     updateCosting();
     scheduleRosterSave();
   }
-  function stockChanged() {
-    updateCosting();
-    scheduleRosterSave();
-  }
 
-  /* ---------- The Larder ---------- */
-  let weekPurchases = { purchases: [], total: 0 };
-
-  async function loadPurchases() {
-    try {
-      const res = await fetch(`/api/purchases?week=${rosterWeekStart}&key=${encodeURIComponent(managerKey)}`);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      weekPurchases = await res.json();
-      renderPurchases();
-      updateCosting();
-    } catch (err) {
-      document.getElementById("purchBody").innerHTML =
-        `<tr><td colspan="5" style="color: var(--dim);">Purchases didn't load — refresh to try again.</td></tr>`;
-    }
-  }
-
-  function renderPurchases() {
-    const { purchases, total } = weekPurchases;
-    const rows = purchases.map((p) => `
-      <tr>
-        <td>${fmtDay(p.date + "T12:00:00")}</td>
-        <td>${esc(p.supplier || "—")}</td>
-        <td>${esc(p.source === "whatsapp" ? "WhatsApp" : p.source === "invoice_photo" ? "Invoice photo" : "Dashboard")}</td>
-        <td class="amt">$${Number(p.amount).toFixed(2)}</td>
-        <td style="text-align:right;"><button class="del-btn" title="Remove this entry" onclick="deletePurchase('${esc(p.id)}')">✕</button></td>
-      </tr>`).join("");
-    const totalRow = purchases.length
-      ? `<tr class="total-row"><td colspan="3">This week</td><td class="amt">$${total.toFixed(2)}</td><td></td></tr>`
-      : "";
-    document.getElementById("purchBody").innerHTML =
-      rows + totalRow ||
-      `<tr><td colspan="5" style="color: var(--dim);">No purchases logged this week. Log one above, or text "spend 420 bidfood" to the bot.</td></tr>`;
-  }
-
-  async function addPurchase() {
-    const statusEl = document.getElementById("purchStatus");
-    const date = document.getElementById("purchDate").value;
-    const amount = Number(document.getElementById("purchAmount").value);
-    const supplier = document.getElementById("purchSupplier").value.trim();
-    if (!date || !isFinite(amount) || amount <= 0) {
-      statusEl.innerHTML = `<span class="fail">A date and a positive amount are both needed.</span>`;
-      return;
-    }
-    try {
-      const res = await fetch(`/api/purchases?key=${encodeURIComponent(managerKey)}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ date, amount, supplier }),
-      });
-      const json = await res.json();
-      if (!res.ok) throw new Error(json.error || "Log failed");
-      statusEl.innerHTML = `<span class="ok">Logged.</span>`;
-      document.getElementById("purchAmount").value = "";
-      document.getElementById("purchSupplier").value = "";
-      loadPurchases();
-    } catch (err) {
-      statusEl.innerHTML = `<span class="fail">${esc(err.message || "Log failed — try again.")}</span>`;
-    }
-  }
-
-  async function deletePurchase(id) {
-    try {
-      const res = await fetch(`/api/purchases/${encodeURIComponent(id)}?key=${encodeURIComponent(managerKey)}`, { method: "DELETE" });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      loadPurchases();
-    } catch (err) {
-      alert("Couldn't remove that entry — try again.");
-    }
-  }
-
-  function foodCostForWeek() {
-    const rev = Number(document.getElementById("revenueInput").value);
-    const purchases = weekPurchases.total || 0;
-    const openRaw = document.getElementById("openingStock").value;
-    const closeRaw = document.getElementById("closingStock").value;
-    const hasStocktake = openRaw !== "" && closeRaw !== "";
-    const cogs = hasStocktake ? Number(openRaw) + purchases - Number(closeRaw) : purchases;
-    return { rev, cogs, hasStocktake };
-  }
   function renderVariance() {
     const el = document.getElementById("vaGrid");
     if (!el || !window._actuals) return;
@@ -2129,14 +1985,8 @@
         [],
         ["Revenue (forecast/entered)", json.revenue != null ? json.revenue : "not entered"],
         ["Labour cost (actual, amended-aware)", json.labourCost],
-        ["Food purchases", json.purchases],
-        ["Opening stock", json.openingStock != null ? json.openingStock : ""],
-        ["Closing stock", json.closingStock != null ? json.closingStock : ""],
-        ["COGS (" + json.cogsBasis + " basis)", json.cogs],
         [],
         ["Labour %", json.labourPct != null ? json.labourPct : "needs revenue"],
-        ["Food %", json.foodPct != null ? json.foodPct : "needs revenue"],
-        ["Prime %", json.primePct != null ? json.primePct : "needs revenue"],
       ];
       downloadCsv(`pnl_week_${json.week}.csv`, rows);
       statusEl.innerHTML = `<span class="ok">Downloaded.</span>`;
@@ -2146,7 +1996,6 @@
   }
 
   /* ---------- Boot ---------- */
-  document.getElementById("purchDate").value = new Date().toISOString().slice(0, 10);
   renderBrushLabel();
   (function initReportRange() {
     const lastMon = new Date(mondayOf(new Date()) + "T12:00:00");
